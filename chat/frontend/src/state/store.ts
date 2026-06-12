@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import {
   BUILD_STEPS,
   CHAT_MODEL_STORAGE_KEY,
+  PROGRESSION_STORAGE_KEY,
   SECOND_MODEL_STORAGE_KEY,
   SYSTEM_STORAGE_KEY,
   VIEWER_PHASES,
@@ -21,15 +22,37 @@ import type {
 } from '../types/events'
 import { createDefaultViewerPhases, createToolPlanCard } from '../types/events'
 import { createFeedId } from '../utils/id'
-import { didLevelUp, getProgression, type ProgressionSnapshot } from './progression'
+import {
+  didLevelUp,
+  getMaxTotalXp,
+  getProgression,
+  xpGrantAmount,
+  type ProgressionSnapshot,
+  type XpSource,
+} from './progression'
 
 type SidePanelTab = 'tools' | 'packages'
+
+export type PlayerProgress = {
+  totalXp: number
+  chatsCompleted: number
+  skillsUnlocked: number
+}
+
+export type GrantXpResult = {
+  leveledUp: boolean
+  xpGained: number
+  progression: ProgressionSnapshot
+  granted: boolean
+}
 
 export type CelebrationEvent = {
   id: string
   toolName: string
   progression: ProgressionSnapshot
   leveledUp: boolean
+  xpGained: number
+  source: XpSource | 'level'
 }
 
 type AppState = {
@@ -52,6 +75,8 @@ type AppState = {
   showScrollBottom: boolean
   celebration: CelebrationEvent | null
   recentlyUnlockedTool: string | null
+  playerProgress: PlayerProgress
+  lastXpGainAt: number | null
   abortController: AbortController | null
   runAbortControllers: Map<string, AbortController>
 
@@ -69,6 +94,7 @@ type AppState = {
   setShowScrollBottom: (show: boolean) => void
   clearCelebration: () => void
   clearRecentlyUnlockedTool: () => void
+  grantXp: (source: XpSource) => GrantXpResult
   setAbortController: (controller: AbortController | null) => void
   bindRunAbortController: (runId: string) => AbortController
   clearRunAbortController: (runId: string) => void
@@ -126,6 +152,37 @@ function loadStorage(key: string): string {
   return localStorage.getItem(key) || ''
 }
 
+function loadPlayerProgress(): PlayerProgress {
+  try {
+    const raw = localStorage.getItem(PROGRESSION_STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<PlayerProgress>
+      return {
+        totalXp: Math.max(0, Number(parsed.totalXp) || 0),
+        chatsCompleted: Math.max(0, Number(parsed.chatsCompleted) || 0),
+        skillsUnlocked: Math.max(0, Number(parsed.skillsUnlocked) || 0),
+      }
+    }
+  } catch {
+    // ignore corrupt storage
+  }
+  return { totalXp: 0, chatsCompleted: 0, skillsUnlocked: 0 }
+}
+
+function savePlayerProgress(progress: PlayerProgress) {
+  localStorage.setItem(PROGRESSION_STORAGE_KEY, JSON.stringify(progress))
+}
+
+function migrateLegacyProgress(tools: ToolSummary[], progress: PlayerProgress): PlayerProgress {
+  const hasSaved = localStorage.getItem(PROGRESSION_STORAGE_KEY) !== null
+  if (hasSaved || progress.totalXp > 0 || tools.length === 0) return progress
+  return {
+    totalXp: Math.min(tools.length * 100, getMaxTotalXp()),
+    chatsCompleted: progress.chatsCompleted,
+    skillsUnlocked: tools.length,
+  }
+}
+
 function getProcessRun(runs: ProcessRun[], runId: string): ProcessRun | undefined {
   return runs.find((run) => run.runId === runId)
 }
@@ -150,6 +207,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   showScrollBottom: false,
   celebration: null,
   recentlyUnlockedTool: null,
+  playerProgress: loadPlayerProgress(),
+  lastXpGainAt: null,
   abortController: null,
   runAbortControllers: new Map(),
 
@@ -171,11 +230,69 @@ export const useAppStore = create<AppState>((set, get) => ({
   setStatus: (text, isError = false) => set({ status: text, statusIsError: isError }),
   setIsSending: (active) => set({ isSending: active }),
   setActiveSidePanelTab: (tab) => set({ activeSidePanelTab: tab }),
-  setTools: (tools) => set({ tools }),
+  setTools: (tools) => {
+    const current = get().playerProgress
+    const migrated = migrateLegacyProgress(tools, current)
+    if (
+      migrated.totalXp !== current.totalXp ||
+      migrated.skillsUnlocked !== current.skillsUnlocked
+    ) {
+      savePlayerProgress(migrated)
+      set({ tools, playerProgress: migrated })
+      return
+    }
+    set({ tools })
+  },
   setPackages: (packages) => set({ packages }),
   setShowScrollBottom: (show) => set({ showScrollBottom: show }),
   clearCelebration: () => set({ celebration: null }),
   clearRecentlyUnlockedTool: () => set({ recentlyUnlockedTool: null }),
+
+  grantXp: (source) => {
+    const amount = xpGrantAmount(source)
+    const beforeXp = get().playerProgress.totalXp
+    const progressionBefore = getProgression(beforeXp)
+
+    if (progressionBefore.isMaxLevel) {
+      return {
+        leveledUp: false,
+        xpGained: 0,
+        progression: progressionBefore,
+        granted: false,
+      }
+    }
+
+    const cappedAfter = Math.min(beforeXp + amount, getMaxTotalXp())
+    const xpGained = cappedAfter - beforeXp
+    if (xpGained <= 0) {
+      return {
+        leveledUp: false,
+        xpGained: 0,
+        progression: progressionBefore,
+        granted: false,
+      }
+    }
+
+    const progress: PlayerProgress = {
+      totalXp: cappedAfter,
+      chatsCompleted:
+        get().playerProgress.chatsCompleted + (source === 'chat' ? 1 : 0),
+      skillsUnlocked:
+        get().playerProgress.skillsUnlocked + (source === 'skill' ? 1 : 0),
+    }
+    savePlayerProgress(progress)
+
+    const progression = getProgression(cappedAfter, xpGained)
+    const leveledUp = didLevelUp(beforeXp, cappedAfter)
+
+    set({
+      playerProgress: progress,
+      lastXpGainAt: Date.now(),
+    })
+
+    return { leveledUp, xpGained, progression, granted: true }
+  },
+
   setAbortController: (controller) => set({ abortController: controller }),
 
   bindRunAbortController: (runId) => {
@@ -518,9 +635,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       | ToolPlanFeedItem
       | undefined
     const toolName = item?.card.toolName || 'Skill'
-    const toolCountAfter = get().tools.length
-    const toolCountBefore = Math.max(0, toolCountAfter - 1)
-    const leveledUp = didLevelUp(toolCountBefore, toolCountAfter)
+    const xpResult = get().grantXp('skill')
 
     const phases = Object.fromEntries(
       VIEWER_PHASES.map((p) => [p.id, 'done' as PhaseStatus]),
@@ -541,8 +656,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       celebration: {
         id: createFeedId(),
         toolName,
-        progression: getProgression(toolCountAfter),
-        leveledUp,
+        progression: xpResult.progression,
+        leveledUp: xpResult.leveledUp,
+        xpGained: xpResult.xpGained,
+        source: 'skill',
       },
       recentlyUnlockedTool: toolName,
       activeSidePanelTab: 'tools',

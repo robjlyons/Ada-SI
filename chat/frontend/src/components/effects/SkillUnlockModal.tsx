@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import { getXpProgressPercent } from '../../state/progression'
 import type { CelebrationEvent } from '../../state/store'
 
 type SkillUnlockModalProps = {
@@ -7,8 +8,8 @@ type SkillUnlockModalProps = {
 }
 
 export function SkillUnlockModal({ event, onDismiss }: SkillUnlockModalProps) {
-  const { toolName, progression, leveledUp } = event
-  const progressPct = Math.round((progression.xpInLevel / 300) * 100)
+  const { toolName, progression, leveledUp, xpGained } = event
+  const progressPct = getXpProgressPercent(progression)
 
   return (
     <motion.div
@@ -86,8 +87,17 @@ export function SkillUnlockModal({ event, onDismiss }: SkillUnlockModalProps) {
           transition={{ delay: 0.4, duration: 0.35 }}
         >
           {leveledUp
-            ? 'Your agent just leveled up with a new capability.'
+            ? 'ADA leveled up with a new capability.'
             : 'This skill is now available in your sidebar and ready to use.'}
+        </motion.p>
+
+        <motion.p
+          className="skill-unlock-modal-xp-source"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.44, duration: 0.35 }}
+        >
+          +{xpGained} XP · Skill unlocked · {progression.rankTitle}
         </motion.p>
 
         <motion.div
@@ -99,12 +109,14 @@ export function SkillUnlockModal({ event, onDismiss }: SkillUnlockModalProps) {
           <div className="skill-unlock-modal-stat">
             <span className="skill-unlock-modal-stat-label">XP gained</span>
             <span className="skill-unlock-modal-stat-value skill-unlock-xp">
-              +{progression.xpGained}
+              +{xpGained}
             </span>
           </div>
           <div className="skill-unlock-modal-stat">
             <span className="skill-unlock-modal-stat-label">Level</span>
-            <span className="skill-unlock-modal-stat-value">Lv. {progression.level}</span>
+            <span className="skill-unlock-modal-stat-value">
+              {progression.isMaxLevel ? 'Lv. 50 MAX' : `Lv. ${progression.level}`}
+            </span>
           </div>
         </motion.div>
 

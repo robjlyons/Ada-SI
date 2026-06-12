@@ -218,6 +218,9 @@ export function useChatStream() {
             })
             if (finalContent) {
               store.pushConversation({ role: 'assistant', content: finalContent })
+              if (finalContent !== '(No response)') {
+                store.grantXp('chat')
+              }
             }
           }
           store.setStatus('')

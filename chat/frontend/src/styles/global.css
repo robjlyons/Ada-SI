@@ -6,8 +6,28 @@
   -webkit-backdrop-filter: blur(18px) saturate(1.35);
   border: 1px solid var(--glass-border);
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.35),
+    var(--shadow-md),
+    var(--glow-teal),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition:
+    box-shadow var(--duration) var(--ease),
+    border-color var(--duration) var(--ease);
+}
+
+.glass-panel:hover {
+  border-color: rgba(125, 255, 212, 0.16);
+  box-shadow:
+    var(--shadow-md),
+    var(--glow-active),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.glow-border {
+  box-shadow: var(--glow-teal), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.glow-border-gold {
+  box-shadow: var(--glow-gold), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .scroll-area {
@@ -149,6 +169,25 @@
   padding-bottom: 0.75rem;
   margin-bottom: 0.65rem;
   border-bottom: 1px solid var(--glass-border);
+  position: relative;
+}
+
+.player-stats-bar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(125, 255, 212, 0.35),
+    rgba(255, 209, 102, 0.25),
+    rgba(110, 207, 255, 0.2),
+    transparent
+  );
+  pointer-events: none;
 }
 
 .player-stats-body {
@@ -210,7 +249,8 @@
   border: 1px solid rgba(255, 209, 102, 0.25);
 }
 
-.player-skill-count {
+.player-skill-count,
+.player-chat-count {
   font-size: var(--text-xs);
   font-weight: 500;
   color: var(--muted);
@@ -218,6 +258,12 @@
   border-radius: 999px;
   background: var(--glass-highlight);
   border: 1px solid var(--glass-border);
+}
+
+.player-chat-count {
+  color: var(--cyan);
+  border-color: rgba(110, 207, 255, 0.15);
+  background: var(--cyan-soft);
 }
 
 .player-xp-row {
@@ -239,9 +285,36 @@
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--gold), var(--accent), var(--success));
-  box-shadow: 0 0 12px rgba(78, 205, 196, 0.35);
+  background: linear-gradient(90deg, var(--gold), var(--accent), var(--cyan), var(--success));
+  background-size: 200% 100%;
+  animation: xpShimmer 4s linear infinite;
+  box-shadow: var(--glow-teal), var(--glow-gold);
   transition: width 0.6s var(--ease);
+}
+
+.player-xp-bar.xp-pulse .player-xp-fill {
+  animation: xpShimmer 4s linear infinite, xpGainPulse 0.9s var(--ease);
+}
+
+@keyframes xpShimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+@keyframes xpGainPulse {
+  0%,
+  100% {
+    filter: brightness(1);
+    box-shadow: var(--glow-teal), var(--glow-gold);
+  }
+  50% {
+    filter: brightness(1.25);
+    box-shadow: var(--glow-active), var(--glow-cyan);
+  }
 }
 
 .player-xp-label {
@@ -335,6 +408,24 @@
   padding: 0.85rem 1rem;
   border-bottom: 1px solid var(--glass-border);
   flex-shrink: 0;
+  position: relative;
+}
+
+.panel-header::after {
+  content: "";
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(125, 255, 212, 0.28),
+    rgba(255, 209, 102, 0.18),
+    transparent
+  );
+  pointer-events: none;
 }
 
 .panel-title-row {
@@ -385,7 +476,8 @@
 .panel-tab.active {
   background: var(--accent-soft);
   color: var(--gold);
-  border: 1px solid rgba(125, 255, 212, 0.15);
+  border: 1px solid rgba(125, 255, 212, 0.22);
+  box-shadow: var(--glow-teal);
 }
 
 .pip-package-card {
@@ -606,6 +698,7 @@
 
 .process-step.step-active .process-step-icon .icon-active-ring {
   animation: stepPulse 1.5s var(--ease) infinite;
+  filter: drop-shadow(0 0 6px rgba(255, 209, 102, 0.45));
 }
 
 .process-step.step-done .process-step-icon {
@@ -663,8 +756,8 @@
 
 .tool-card:hover {
   transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
-  border-color: rgba(125, 255, 212, 0.22);
+  box-shadow: var(--shadow-md), var(--glow-cyan);
+  border-color: rgba(110, 207, 255, 0.28);
 }
 
 .tool-card:last-child {
@@ -1005,7 +1098,7 @@ button:disabled {
   font-size: 1.25rem;
   font-weight: 600;
   margin-bottom: 1rem;
-  box-shadow: var(--shadow-glow), 0 0 24px rgba(255, 209, 102, 0.15);
+  box-shadow: var(--shadow-glow), var(--glow-gold), var(--glow-teal);
 }
 
 .welcome h2 {
@@ -1037,6 +1130,16 @@ button:disabled {
   border-radius: 999px;
   border: 1px solid var(--glass-border);
   background: var(--glass-highlight);
+  transition:
+    border-color var(--duration) var(--ease),
+    box-shadow var(--duration) var(--ease),
+    color var(--duration) var(--ease);
+}
+
+.welcome-chip:hover {
+  color: var(--gold);
+  border-color: rgba(255, 209, 102, 0.25);
+  box-shadow: var(--glow-gold);
 }
 
 .scroll-bottom {
@@ -1322,7 +1425,7 @@ button:disabled {
 
 .btn-send:hover:not(:disabled) {
   background: var(--accent-hover);
-  box-shadow: var(--shadow-glow), 0 0 16px rgba(255, 209, 102, 0.2);
+  box-shadow: var(--glow-active), var(--glow-gold);
   transform: scale(1.04);
 }
 
@@ -1377,7 +1480,7 @@ button:disabled {
 
 .tool-plan-card.tool-card-active {
   border-color: rgba(125, 255, 212, 0.35);
-  box-shadow: var(--shadow-glow), 0 0 0 1px rgba(78, 205, 196, 0.12);
+  box-shadow: var(--glow-active), 0 0 0 1px rgba(78, 205, 196, 0.12);
 }
 
 .tool-card-chrome {
@@ -1896,11 +1999,23 @@ button:disabled {
 .skill-unlock-modal-desc {
   position: relative;
   z-index: 1;
-  margin: 0 auto 1.35rem;
+  margin: 0 auto 0.65rem;
   max-width: 34ch;
   font-size: var(--text-sm);
   line-height: 1.55;
   color: var(--muted);
+}
+
+.skill-unlock-modal-xp-source {
+  position: relative;
+  z-index: 1;
+  margin: 0 auto 1rem;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--gold);
+  text-shadow: 0 0 16px rgba(255, 209, 102, 0.25);
 }
 
 .skill-unlock-modal-stats {
@@ -1957,7 +2072,8 @@ button:disabled {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--accent), var(--success));
+  background: linear-gradient(90deg, var(--gold), var(--accent), var(--cyan));
+  box-shadow: var(--glow-teal);
 }
 
 .skill-unlock-modal-continue {
@@ -2085,12 +2201,13 @@ button:disabled {
 
 .btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
-  box-shadow: var(--shadow-glow), 0 0 20px rgba(255, 209, 102, 0.15);
+  box-shadow: var(--glow-active), var(--glow-gold);
 }
 
 .btn-primary:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 2px;
+  box-shadow: var(--glow-gold);
 }
 
 .btn-ghost {
@@ -2299,6 +2416,15 @@ button:disabled {
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .player-xp-fill {
+    animation: none !important;
+    background: linear-gradient(90deg, var(--gold), var(--accent));
+  }
+
+  .glass-panel:hover {
+    box-shadow: var(--shadow-md), var(--glow-teal), inset 0 1px 0 rgba(255, 255, 255, 0.04);
   }
 }
 

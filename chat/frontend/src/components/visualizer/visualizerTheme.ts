@@ -1,17 +1,19 @@
+import { AVATAR_PALETTE } from '../../theme/avatarPalette'
+
 export const VISUALIZER_COLORS = {
-  bg: '#060810',
-  accent: '#5b8cff',
-  accentBright: '#9ec5ff',
-  teal: '#2dd4a8',
-  tealBright: '#7dffd4',
-  gold: '#ffd166',
-  goldBright: '#ffe8a8',
-  goldDeep: '#c9922e',
-  core: '#ffffff',
-  ringCool: '#b8d4ff',
-  ringWarm: '#ffcc66',
-  line: '#6ecfff',
-  particle: '#fff4d6',
+  bg: AVATAR_PALETTE.bg,
+  accent: AVATAR_PALETTE.accent,
+  accentBright: AVATAR_PALETTE.accentBright,
+  teal: AVATAR_PALETTE.teal,
+  tealBright: AVATAR_PALETTE.tealBright,
+  gold: AVATAR_PALETTE.gold,
+  goldBright: AVATAR_PALETTE.goldBright,
+  goldDeep: AVATAR_PALETTE.goldDeep,
+  core: AVATAR_PALETTE.core,
+  ringCool: AVATAR_PALETTE.ringCool,
+  ringWarm: AVATAR_PALETTE.ringWarm,
+  line: AVATAR_PALETTE.line,
+  particle: AVATAR_PALETTE.particle,
 } as const
 
 export const MODE_INTENSITY = {

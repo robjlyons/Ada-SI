@@ -1,3 +1,5 @@
+export const PROGRESSION_STORAGE_KEY = 'ada-player-progress'
+
 export const CHAT_MODEL_STORAGE_KEY = 'ada-si-chat-model'
 export const SECOND_MODEL_STORAGE_KEY = 'ada-si-second-model'
 export const SYSTEM_STORAGE_KEY = 'ada-si-system-instructions'

@@ -14,6 +14,12 @@
   --accent-soft: rgba(78, 205, 196, 0.12);
   --gold: #ffd166;
   --gold-soft: rgba(255, 209, 102, 0.12);
+  --gold-bright: #ffe8a8;
+  --gold-deep: #c9922e;
+  --cyan: #6ecfff;
+  --cyan-soft: rgba(110, 207, 255, 0.12);
+  --ring-cool: #b8d4ff;
+  --ring-warm: #ffcc66;
   --success: #3ecf8e;
   --success-soft: rgba(62, 207, 142, 0.15);
   --danger: #ff6b6b;
@@ -27,6 +33,10 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
   --shadow-md: 0 8px 32px rgba(0, 0, 0, 0.35);
   --shadow-glow: 0 0 32px rgba(78, 205, 196, 0.08);
+  --glow-teal: 0 0 24px rgba(125, 255, 212, 0.18);
+  --glow-gold: 0 0 28px rgba(255, 209, 102, 0.16);
+  --glow-cyan: 0 0 20px rgba(110, 207, 255, 0.14);
+  --glow-active: 0 0 32px rgba(78, 205, 196, 0.22), 0 0 48px rgba(255, 209, 102, 0.08);
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
   --text-base: 0.9375rem;
@@ -49,6 +59,7 @@ body {
   font-family: "Inter", "Segoe UI", system-ui, sans-serif;
   font-size: var(--text-base);
   background:
+    radial-gradient(ellipse 75% 55% at 50% 38%, rgba(110, 207, 255, 0.05), transparent 55%),
     radial-gradient(ellipse 80% 60% at 50% 40%, rgba(255, 200, 100, 0.06), transparent 55%),
     radial-gradient(ellipse 70% 50% at 50% 45%, rgba(45, 212, 168, 0.08), transparent 50%),
     var(--bg);
