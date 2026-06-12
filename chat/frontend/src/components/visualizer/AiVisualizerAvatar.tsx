@@ -13,18 +13,17 @@ function VisualizerFallback() {
   )
 }
 
-function ReducedMotionFallback({ label }: { label: string }) {
+function ReducedMotionFallback() {
   return (
     <div className="ai-visualizer-static" aria-hidden="true">
       <div className="ai-visualizer-static-core" />
       <div className="ai-visualizer-static-ring ai-visualizer-static-ring-1" />
       <div className="ai-visualizer-static-ring ai-visualizer-static-ring-2" />
-      <span className="ai-visualizer-static-label">{label}</span>
     </div>
   )
 }
 
-export function AiVisualizerPanel() {
+export function AiVisualizerAvatar() {
   const activity = useVisualizerActivity()
   const containerRef = useRef<HTMLDivElement>(null)
   const [mouse, setMouse] = useState({ x: 0, y: 0 })
@@ -33,12 +32,21 @@ export function AiVisualizerPanel() {
       typeof window !== 'undefined' &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches,
   )
+  const [canvasReady, setCanvasReady] = useState(false)
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
     const onChange = () => setReducedMotion(mq.matches)
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setCanvasReady(true))
+    return () => {
+      cancelAnimationFrame(id)
+      setCanvasReady(false)
+    }
   }, [])
 
   const handleMouseMove = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
@@ -54,37 +62,30 @@ export function AiVisualizerPanel() {
     setMouse({ x: 0, y: 0 })
   }, [])
 
-  const statusClass = `ai-visualizer-status ai-visualizer-status-${activity.mode}`
-
   return (
-    <section
-      className="ai-visualizer-panel glass-panel"
-      aria-label="AI neural visualizer"
+    <div
+      ref={containerRef}
+      className={`ai-visualizer-avatar mode-${activity.mode}`}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      title={activity.statusLabel}
     >
-      <div className="ai-visualizer-header">
-        <h2 className="ai-visualizer-title">Neural Core</h2>
-        <span className={statusClass} role="status">
-          {activity.statusLabel}
-        </span>
-      </div>
-      <div
-        ref={containerRef}
-        className="ai-visualizer-viewport"
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
-      >
-        {reducedMotion ? (
-          <ReducedMotionFallback label={activity.statusLabel} />
-        ) : (
-          <Suspense fallback={<VisualizerFallback />}>
-            <AiVisualizerCanvas
-              activity={activity}
-              mouse={mouse}
-              reducedMotion={reducedMotion}
-            />
-          </Suspense>
-        )}
-      </div>
-    </section>
+      <span className="sr-only" role="status">
+        {activity.statusLabel}
+      </span>
+      {reducedMotion ? (
+        <ReducedMotionFallback />
+      ) : canvasReady ? (
+        <Suspense fallback={<VisualizerFallback />}>
+          <AiVisualizerCanvas
+            activity={activity}
+            mouse={mouse}
+            reducedMotion={reducedMotion}
+          />
+        </Suspense>
+      ) : (
+        <VisualizerFallback />
+      )}
+    </div>
   )
 }

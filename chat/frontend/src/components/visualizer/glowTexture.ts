@@ -19,65 +19,59 @@ function createRadialCanvas(
   return canvas
 }
 
-let softGlow: THREE.CanvasTexture | null = null
-let bokehGlow: THREE.CanvasTexture | null = null
-let runeRing: THREE.CanvasTexture | null = null
-
-export function getSoftGlowTexture(): THREE.CanvasTexture {
-  if (!softGlow) {
-    softGlow = new THREE.CanvasTexture(
-      createRadialCanvas('rgba(255,255,255,1)', 'rgba(180,230,255,0.55)', 'rgba(255,255,255,0)'),
-    )
-    softGlow.colorSpace = THREE.SRGBColorSpace
-  }
-  return softGlow
+export function createSoftGlowTexture(): THREE.CanvasTexture {
+  const tex = new THREE.CanvasTexture(
+    createRadialCanvas('rgba(255,255,255,1)', 'rgba(180,230,255,0.55)', 'rgba(255,255,255,0)'),
+  )
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
 }
 
-export function getBokehTexture(): THREE.CanvasTexture {
-  if (!bokehGlow) {
-    bokehGlow = new THREE.CanvasTexture(
-      createRadialCanvas('rgba(255,240,200,1)', 'rgba(255,200,100,0.45)', 'rgba(255,180,80,0)'),
-    )
-    bokehGlow.colorSpace = THREE.SRGBColorSpace
-  }
-  return bokehGlow
+export function createBokehTexture(): THREE.CanvasTexture {
+  const tex = new THREE.CanvasTexture(
+    createRadialCanvas('rgba(255,240,200,1)', 'rgba(255,200,100,0.45)', 'rgba(255,180,80,0)'),
+  )
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
 }
 
-export function getRuneRingTexture(): THREE.CanvasTexture {
-  if (!runeRing) {
-    const size = 512
-    const canvas = document.createElement('canvas')
-    canvas.width = size
-    canvas.height = size
-    const ctx = canvas.getContext('2d')!
-    ctx.clearRect(0, 0, size, size)
+export function createRuneRingTexture(): THREE.CanvasTexture {
+  const size = 512
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  ctx.clearRect(0, 0, size, size)
 
-    const cx = size / 2
-    const cy = size / 2
-    const radius = size * 0.38
-    const glyphs = '◈◇◆✦⟡⌁∞⟨⟩⌬◉'
+  const cx = size / 2
+  const cy = size / 2
+  const radius = size * 0.38
+  const glyphs = '◈◇◆✦⟡⌁∞⟨⟩⌬◉'
 
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.font = '600 22px ui-monospace, monospace'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.font = '600 22px ui-monospace, monospace'
 
-    for (let i = 0; i < 36; i += 1) {
-      const angle = (i / 36) * Math.PI * 2 - Math.PI / 2
-      const x = cx + Math.cos(angle) * radius
-      const y = cy + Math.sin(angle) * radius
-      ctx.save()
-      ctx.translate(x, y)
-      ctx.rotate(angle + Math.PI / 2)
-      const alpha = 0.35 + (i % 3) * 0.15
-      ctx.fillStyle = `rgba(255, 210, 120, ${alpha})`
-      ctx.shadowColor = 'rgba(255, 200, 80, 0.8)'
-      ctx.shadowBlur = 12
-      ctx.fillText(glyphs[i % glyphs.length]!, 0, 0)
-      ctx.restore()
-    }
-
-    runeRing = new THREE.CanvasTexture(canvas)
-    runeRing.colorSpace = THREE.SRGBColorSpace
+  for (let i = 0; i < 36; i += 1) {
+    const angle = (i / 36) * Math.PI * 2 - Math.PI / 2
+    const x = cx + Math.cos(angle) * radius
+    const y = cy + Math.sin(angle) * radius
+    ctx.save()
+    ctx.translate(x, y)
+    ctx.rotate(angle + Math.PI / 2)
+    const alpha = 0.35 + (i % 3) * 0.15
+    ctx.fillStyle = `rgba(255, 210, 120, ${alpha})`
+    ctx.shadowColor = 'rgba(255, 200, 80, 0.8)'
+    ctx.shadowBlur = 12
+    ctx.fillText(glyphs[i % glyphs.length]!, 0, 0)
+    ctx.restore()
   }
-  return runeRing
+
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.colorSpace = THREE.SRGBColorSpace
+  return tex
+}
+
+export function disposeTexture(tex: THREE.Texture | null | undefined) {
+  tex?.dispose()
 }

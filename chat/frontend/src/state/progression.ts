@@ -1,5 +1,5 @@
-const XP_PER_TOOL = 100
-const XP_PER_LEVEL = 300
+export const XP_PER_TOOL = 100
+export const XP_PER_LEVEL = 300
 
 export type ProgressionSnapshot = {
   level: number
@@ -22,6 +22,11 @@ export function getProgression(toolCount: number, xpGained = XP_PER_TOOL): Progr
     xpToNextLevel: xpInLevel === 0 && totalXp > 0 ? XP_PER_LEVEL : xpToNextLevel,
     xpGained,
   }
+}
+
+export function getXpProgressPercent(progression: ProgressionSnapshot): number {
+  if (progression.totalXp > 0 && progression.xpInLevel === 0) return 100
+  return Math.round((progression.xpInLevel / XP_PER_LEVEL) * 100)
 }
 
 export function didLevelUp(beforeCount: number, afterCount: number): boolean {

@@ -3,6 +3,7 @@ import { fetchConfig, fetchModels } from '../../api/client'
 import { useAppStore } from '../../state/store'
 import { getModelLabel, groupModels, isWildcardModel } from '../../utils/models'
 import { SystemInstructions } from './SystemInstructions'
+import { PlayerStatsBar } from './PlayerStatsBar'
 
 export function ModelToolbar() {
   const models = useAppStore((s) => s.models)
@@ -94,14 +95,9 @@ export function ModelToolbar() {
 
   return (
     <header className="header glass-panel">
-      <div className="toolbar">
-        <div className="toolbar-brand" title="Ada-SI · Powered by LiteLLM">
-          <span className="brand-mark" aria-hidden="true">
-            A
-          </span>
-          <span className="brand-name">Ada-SI</span>
-        </div>
+      <PlayerStatsBar />
 
+      <div className="toolbar">
         <div className="toolbar-models">
           {renderSelect('chat-model-select', 'Lite model', chatModel, setChatModel)}
           {renderSelect('second-model-select', 'Skill creator', toolCreatorModel, setToolCreatorModel)}

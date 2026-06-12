@@ -5,7 +5,6 @@ import { ModelToolbar } from '../toolbar/ModelToolbar'
 import { Messages } from '../chat/Messages'
 import { Composer } from '../composer/Composer'
 import { EffectsLayer } from '../effects/EffectsLayer'
-import { AiVisualizerPanel } from '../visualizer/AiVisualizerPanel'
 
 export function AppShell() {
   const feed = useAppStore((s) => s.feed)
@@ -14,27 +13,28 @@ export function AppShell() {
 
   return (
     <div className="app-shell">
-      <EffectsLayer />
-      <ProcessPanel />
-      <div className="main-column">
-        <ModelToolbar />
-        <AiVisualizerPanel />
-        <div className="chat-surface glass-panel">
-          <div className="messages-wrap">
-            <Messages feed={feed} />
-            <button
-              type="button"
-              className={`scroll-bottom${showScrollBottom ? '' : ' hidden'}`}
-              title="Scroll to bottom"
-              onClick={() => setShowScrollBottom(false)}
-            >
-              ↓ New messages
-            </button>
+      <div className="app-shell-content">
+        <ProcessPanel />
+        <div className="main-column">
+          <ModelToolbar />
+          <div className="chat-surface glass-panel">
+            <div className="messages-wrap">
+              <Messages feed={feed} />
+              <button
+                type="button"
+                className={`scroll-bottom${showScrollBottom ? '' : ' hidden'}`}
+                title="Scroll to bottom"
+                onClick={() => setShowScrollBottom(false)}
+              >
+                ↓ New messages
+              </button>
+            </div>
+            <Composer />
           </div>
-          <Composer />
         </div>
+        <SidePanel />
       </div>
-      <SidePanel />
+      <EffectsLayer />
     </div>
   )
 }

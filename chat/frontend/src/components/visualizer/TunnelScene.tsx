@@ -1,8 +1,13 @@
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing'
 import * as THREE from 'three'
-import { getBokehTexture, getRuneRingTexture, getSoftGlowTexture } from './glowTexture'
+import {
+  createBokehTexture,
+  createRuneRingTexture,
+  createSoftGlowTexture,
+  disposeTexture,
+} from './glowTexture'
 import { getPortalData } from './tunnelGeometry'
 import { VISUALIZER_COLORS } from './visualizerTheme'
 import type { VisualizerActivity } from './useVisualizerActivity'
@@ -17,9 +22,40 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t
 }
 
+function getPulseSpeed(mode: VisualizerActivity['mode']): number {
+  switch (mode) {
+    case 'thinking':
+      return 1.1
+    case 'streaming':
+      return 1.35
+    case 'building':
+      return 0.95
+    case 'celebrating':
+      return 1.55
+    default:
+      return 0.6
+  }
+}
+
+function getPulseAmount(mode: VisualizerActivity['mode']): number {
+  switch (mode) {
+    case 'thinking':
+      return 0.022
+    case 'streaming':
+      return 0.028
+    case 'building':
+      return 0.02
+    case 'celebrating':
+      return 0.035
+    default:
+      return 0
+  }
+}
+
 export function TunnelScene({ activity, mouse, reducedMotion }: TunnelSceneProps) {
   const portal = useMemo(() => getPortalData(), [])
   const ringsRef = useRef<THREE.Group>(null)
+  const portalGroupRef = useRef<THREE.Group>(null)
   const runeRingRef = useRef<THREE.Mesh>(null)
   const raysRef = useRef<THREE.LineSegments>(null)
   const plexusRef = useRef<THREE.LineSegments>(null)
@@ -28,12 +64,140 @@ export function TunnelScene({ activity, mouse, reducedMotion }: TunnelSceneProps
   const haloRef = useRef<THREE.Mesh>(null)
   const coreLightRef = useRef<THREE.PointLight>(null)
 
-  const softGlow = useMemo(() => getSoftGlowTexture(), [])
-  const bokehTex = useMemo(() => getBokehTexture(), [])
-  const runeTex = useMemo(() => getRuneRingTexture(), [])
+  const textures = useMemo(
+    () => ({
+      softGlow: createSoftGlowTexture(),
+      bokeh: createBokehTexture(),
+      rune: createRuneRingTexture(),
+    }),
+    [],
+  )
 
-  const smooth = useRef({ intensity: activity.intensity, coreScale: 1 })
+  const materials = useMemo(() => {
+    const rayMat = new THREE.LineBasicMaterial({
+      color: VISUALIZER_COLORS.goldBright,
+      transparent: true,
+      opacity: 0.25,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+    const plexusMat = new THREE.LineBasicMaterial({
+      color: VISUALIZER_COLORS.line,
+      transparent: true,
+      opacity: 0.35,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+    const nodeMat = new THREE.PointsMaterial({
+      map: textures.softGlow,
+      color: VISUALIZER_COLORS.tealBright,
+      size: 0.14,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: true,
+    })
+    const bokehSmallMat = new THREE.PointsMaterial({
+      map: textures.bokeh,
+      color: VISUALIZER_COLORS.particle,
+      size: 0.22,
+      transparent: true,
+      opacity: 0.55,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: true,
+    })
+    const bokehLargeMat = new THREE.PointsMaterial({
+      map: textures.bokeh,
+      color: VISUALIZER_COLORS.gold,
+      size: 0.45,
+      transparent: true,
+      opacity: 0.35,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      sizeAttenuation: true,
+    })
+    const shardMat = new THREE.MeshBasicMaterial({
+      color: VISUALIZER_COLORS.ringCool,
+      transparent: true,
+      opacity: 0.18,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+    const runeMat = new THREE.MeshBasicMaterial({
+      map: textures.rune,
+      transparent: true,
+      opacity: 0.5,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    })
+    const haloMat = new THREE.MeshBasicMaterial({
+      map: textures.softGlow,
+      color: VISUALIZER_COLORS.goldBright,
+      transparent: true,
+      opacity: 0.15,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+    const coreMat = new THREE.MeshBasicMaterial({
+      color: VISUALIZER_COLORS.core,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
+    const coreHaloMat = new THREE.MeshBasicMaterial({
+      color: VISUALIZER_COLORS.teal,
+      transparent: true,
+      opacity: 0.12,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    })
 
+    return {
+      rayMat,
+      plexusMat,
+      nodeMat,
+      bokehSmallMat,
+      bokehLargeMat,
+      shardMat,
+      runeMat,
+      haloMat,
+      coreMat,
+      coreHaloMat,
+    }
+  }, [textures])
+
+  const shardGeo = useMemo(() => new THREE.PlaneGeometry(1, 1), [])
+  const runeGeo = useMemo(() => new THREE.PlaneGeometry(5.2, 5.2), [])
+  const haloGeo = useMemo(() => new THREE.PlaneGeometry(1, 1), [])
+  const coreGeo = useMemo(() => new THREE.SphereGeometry(0.18, 32, 32), [])
+  const coreHaloGeo = useMemo(() => new THREE.SphereGeometry(0.32, 24, 24), [])
+
+  useEffect(() => {
+    return () => {
+      Object.values(materials).forEach((mat) => mat.dispose())
+      shardGeo.dispose()
+      runeGeo.dispose()
+      haloGeo.dispose()
+      coreGeo.dispose()
+      coreHaloGeo.dispose()
+      disposeTexture(textures.softGlow)
+      disposeTexture(textures.bokeh)
+      disposeTexture(textures.rune)
+    }
+  }, [materials, textures, shardGeo, runeGeo, haloGeo, coreGeo, coreHaloGeo])
+
+  const smooth = useRef({
+    intensity: activity.intensity,
+    coreScale: 1,
+    pulseWeight: 0,
+    pulseSpeed: 0.6,
+    pulseAmount: 0,
+  })
   const dummy = useMemo(() => new THREE.Object3D(), [])
 
   const rayGeometry = useMemo(() => {
@@ -69,15 +233,37 @@ export function TunnelScene({ activity, mouse, reducedMotion }: TunnelSceneProps
   useFrame((state, delta) => {
     if (reducedMotion) return
 
-    const t = state.clock.elapsedTime
-    smooth.current.intensity = lerp(smooth.current.intensity, activity.intensity, delta * 3)
+    const t = state.clock.getElapsedTime()
+    smooth.current.intensity = lerp(smooth.current.intensity, activity.intensity, delta * 2)
 
-    const pulse = 1 + Math.sin(t * (1.2 + smooth.current.intensity * 2.5)) * 0.1
+    const isActive = activity.mode !== 'idle'
+    const targetWeight = isActive ? 1 : 0
+    smooth.current.pulseWeight = lerp(smooth.current.pulseWeight, targetWeight, delta * 1.2)
+    smooth.current.pulseSpeed = lerp(
+      smooth.current.pulseSpeed,
+      getPulseSpeed(activity.mode),
+      delta * 1.2,
+    )
+    smooth.current.pulseAmount = lerp(
+      smooth.current.pulseAmount,
+      getPulseAmount(activity.mode),
+      delta * 1.2,
+    )
+
+    const wave = Math.sin(t * smooth.current.pulseSpeed)
+    const pulse = 1 + wave * smooth.current.pulseAmount * smooth.current.pulseWeight
+    const pulseFactor = pulse
+
     smooth.current.coreScale = lerp(
       smooth.current.coreScale,
-      (0.85 + smooth.current.intensity * 0.55) * pulse,
-      delta * 5,
+      (0.85 + smooth.current.intensity * 0.55) * (1 + (pulse - 1) * 0.65),
+      delta * 3,
     )
+
+    if (portalGroupRef.current) {
+      const portalScale = 1 + (pulse - 1) * smooth.current.pulseWeight * 0.75
+      portalGroupRef.current.scale.setScalar(portalScale)
+    }
 
     const spinSpeed =
       activity.mode === 'celebrating'
@@ -97,43 +283,41 @@ export function TunnelScene({ activity, mouse, reducedMotion }: TunnelSceneProps
         const mat = mesh.material as THREE.MeshBasicMaterial
         const highlight =
           activity.mode === 'building' && i === activity.activePhaseIndex % portal.rings.length
-        mat.opacity = highlight ? 1 : 0.45 + smooth.current.intensity * 0.45
+        mat.opacity = highlight ? 1 : (0.45 + smooth.current.intensity * 0.45) * pulseFactor
       })
     }
 
     if (runeRingRef.current) {
       runeRingRef.current.rotation.z = -t * spinSpeed * 0.6
-      const mat = runeRingRef.current.material as THREE.MeshBasicMaterial
-      mat.opacity = 0.35 + smooth.current.intensity * 0.45
+      materials.runeMat.opacity = (0.35 + smooth.current.intensity * 0.45) * pulseFactor
     }
 
     if (raysRef.current) {
-      const mat = raysRef.current.material as THREE.LineBasicMaterial
-      mat.opacity = 0.12 + smooth.current.intensity * 0.35
+      materials.rayMat.opacity = (0.12 + smooth.current.intensity * 0.35) * pulseFactor
       raysRef.current.rotation.z = t * 0.03
     }
 
     if (plexusRef.current) {
-      const mat = plexusRef.current.material as THREE.LineBasicMaterial
-      mat.opacity = 0.18 + smooth.current.intensity * 0.42
+      materials.plexusMat.opacity = (0.18 + smooth.current.intensity * 0.42) * pulseFactor
       plexusRef.current.rotation.z = t * spinSpeed * 0.25
     }
 
     if (coreRef.current) {
       coreRef.current.scale.setScalar(smooth.current.coreScale)
-      const mat = coreRef.current.material as THREE.MeshBasicMaterial
-      mat.opacity = 0.75 + smooth.current.intensity * 0.25
+      materials.coreMat.opacity = 0.75 + smooth.current.intensity * 0.25
     }
 
     if (haloRef.current) {
-      const s = smooth.current.coreScale * (2.2 + Math.sin(t * 1.8) * 0.15)
+      const haloWave = 1 + Math.sin(t * 1.4) * 0.06 * smooth.current.pulseWeight
+      const s = smooth.current.coreScale * 2.2 * haloWave
       haloRef.current.scale.set(s, s, 1)
-      const mat = haloRef.current.material as THREE.MeshBasicMaterial
-      mat.opacity = 0.08 + smooth.current.intensity * 0.12
+      materials.haloMat.opacity =
+        (0.08 + smooth.current.intensity * 0.12) * pulseFactor
     }
 
     if (coreLightRef.current) {
-      coreLightRef.current.intensity = 2 + smooth.current.intensity * 6
+      coreLightRef.current.intensity =
+        (2 + smooth.current.intensity * 6) * (1 + (pulse - 1) * 0.7 * smooth.current.pulseWeight)
     }
 
     const shards = shardsRef.current
@@ -166,160 +350,83 @@ export function TunnelScene({ activity, mouse, reducedMotion }: TunnelSceneProps
       <color attach="background" args={[VISUALIZER_COLORS.bg]} />
       <fog attach="fog" args={[VISUALIZER_COLORS.bg, 5, 16]} />
 
-      <ambientLight intensity={0.08} />
-      <pointLight
-        ref={coreLightRef}
-        position={[0, 0, 0.6]}
-        color={VISUALIZER_COLORS.goldBright}
-        intensity={3}
-        distance={12}
-      />
-      <pointLight
-        position={[0, 0, -1]}
-        color={VISUALIZER_COLORS.teal}
-        intensity={1.2}
-        distance={10}
-      />
-
-      {/* Radial rays */}
-      <lineSegments ref={raysRef} geometry={rayGeometry}>
-        <lineBasicMaterial
+      <group ref={portalGroupRef}>
+        <ambientLight intensity={0.08} />
+        <pointLight
+          ref={coreLightRef}
+          position={[0, 0, 0.6]}
           color={VISUALIZER_COLORS.goldBright}
-          transparent
-          opacity={0.25}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
+          intensity={3}
+          distance={12}
         />
-      </lineSegments>
+        <pointLight
+          position={[0, 0, -1]}
+          color={VISUALIZER_COLORS.teal}
+          intensity={1.2}
+          distance={10}
+        />
 
-      {/* Plexus shell — no center clutter */}
-      <lineSegments ref={plexusRef} geometry={lineGeometry}>
-        <lineBasicMaterial
-          color={VISUALIZER_COLORS.line}
-          transparent
-          opacity={0.35}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
+        <lineSegments
+          ref={raysRef}
+          geometry={rayGeometry}
+          material={materials.rayMat}
         />
-      </lineSegments>
 
-      <points geometry={nodeGeometry}>
-        <pointsMaterial
-          map={softGlow}
-          color={VISUALIZER_COLORS.tealBright}
-          size={0.14}
-          transparent
-          opacity={0.9}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-          sizeAttenuation
+        <lineSegments
+          ref={plexusRef}
+          geometry={lineGeometry}
+          material={materials.plexusMat}
         />
-      </points>
 
-      {/* Bokeh layers */}
-      <points geometry={bokehSmallGeo}>
-        <pointsMaterial
-          map={bokehTex}
-          color={VISUALIZER_COLORS.particle}
-          size={0.22}
-          transparent
-          opacity={0.55}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-          sizeAttenuation
-        />
-      </points>
-      <points geometry={bokehLargeGeo}>
-        <pointsMaterial
-          map={bokehTex}
-          color={VISUALIZER_COLORS.gold}
-          size={0.45}
-          transparent
-          opacity={0.35}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-          sizeAttenuation
-        />
-      </points>
+        <points geometry={nodeGeometry} material={materials.nodeMat} />
+        <points geometry={bokehSmallGeo} material={materials.bokehSmallMat} />
+        <points geometry={bokehLargeGeo} material={materials.bokehLargeMat} />
 
-      {/* Floating shards */}
-      <instancedMesh ref={shardsRef} args={[undefined, undefined, portal.shardCount]}>
-        <planeGeometry args={[1, 1]} />
-        <meshBasicMaterial
-          color={VISUALIZER_COLORS.ringCool}
-          transparent
-          opacity={0.18}
-          side={THREE.DoubleSide}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
+        <instancedMesh
+          ref={shardsRef}
+          args={[shardGeo, materials.shardMat, portal.shardCount]}
         />
-      </instancedMesh>
 
-      {/* Concentric glowing torus rings */}
-      <group ref={ringsRef}>
-        {portal.rings.map((ring, i) => (
-          <mesh key={`ring-${i}`} position={[0, 0, ring.z]}>
-            <torusGeometry args={[ring.radius, ring.tube, 12, 96]} />
-            <meshBasicMaterial
-              color={ring.warm ? VISUALIZER_COLORS.ringWarm : VISUALIZER_COLORS.tealBright}
-              transparent
-              opacity={0.7}
-              blending={THREE.AdditiveBlending}
-              depthWrite={false}
-            />
-          </mesh>
-        ))}
+        <group ref={ringsRef}>
+          {portal.rings.map((ring, i) => (
+            <mesh key={`ring-${i}`} position={[0, 0, ring.z]}>
+              <torusGeometry args={[ring.radius, ring.tube, 12, 96]} />
+              <meshBasicMaterial
+                color={ring.warm ? VISUALIZER_COLORS.ringWarm : VISUALIZER_COLORS.tealBright}
+                transparent
+                opacity={0.7}
+                blending={THREE.AdditiveBlending}
+                depthWrite={false}
+              />
+            </mesh>
+          ))}
+        </group>
+
+        <mesh
+          ref={runeRingRef}
+          position={[0, 0, 0.18]}
+          geometry={runeGeo}
+          material={materials.runeMat}
+        />
+
+        <mesh
+          ref={haloRef}
+          position={[0, 0, 0.32]}
+          geometry={haloGeo}
+          material={materials.haloMat}
+        />
+
+        <mesh
+          ref={coreRef}
+          position={[0, 0, 0.38]}
+          geometry={coreGeo}
+          material={materials.coreMat}
+        />
+
+        <mesh position={[0, 0, 0.2]} geometry={coreHaloGeo} material={materials.coreHaloMat} />
       </group>
 
-      {/* Rune ring */}
-      <mesh ref={runeRingRef} position={[0, 0, 0.18]}>
-        <planeGeometry args={[5.2, 5.2]} />
-        <meshBasicMaterial
-          map={runeTex}
-          transparent
-          opacity={0.5}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
-
-      {/* Core */}
-      <mesh ref={haloRef} position={[0, 0, 0.32]}>
-        <planeGeometry args={[1, 1]} />
-        <meshBasicMaterial
-          map={softGlow}
-          color={VISUALIZER_COLORS.goldBright}
-          transparent
-          opacity={0.15}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-        />
-      </mesh>
-
-      <mesh ref={coreRef} position={[0, 0, 0.38]}>
-        <sphereGeometry args={[0.18, 32, 32]} />
-        <meshBasicMaterial
-          color={VISUALIZER_COLORS.core}
-          transparent
-          opacity={0.95}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-        />
-      </mesh>
-
-      <mesh position={[0, 0, 0.2]}>
-        <sphereGeometry args={[0.32, 24, 24]} />
-        <meshBasicMaterial
-          color={VISUALIZER_COLORS.teal}
-          transparent
-          opacity={0.12}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-        />
-      </mesh>
-
-      <EffectComposer multisampling={0}>
+      <EffectComposer enableNormalPass={false} multisampling={0}>
         <Bloom
           luminanceThreshold={0.05}
           luminanceSmoothing={0.65}
@@ -327,7 +434,7 @@ export function TunnelScene({ activity, mouse, reducedMotion }: TunnelSceneProps
           mipmapBlur
           radius={0.75}
         />
-        <Vignette eskil={false} offset={0.25} darkness={0.75} />
+        <Vignette eskil={false} offset={0.25} darkness={0.55} />
       </EffectComposer>
     </>
   )

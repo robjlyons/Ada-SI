@@ -9,7 +9,7 @@ export function Welcome() {
         A
       </div>
       <h2>What would you like to build?</h2>
-      <p>Chat with the lite model or request new skills for the agent to create.</p>
+      <p>Chat with ADA or request new skills for the agent to create.</p>
       <div className="welcome-chips">
         {chips.map((chip, index) => (
           <motion.span

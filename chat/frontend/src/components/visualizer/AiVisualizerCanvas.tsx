@@ -32,9 +32,9 @@ export function AiVisualizerCanvas({
     <Canvas
       className="ai-visualizer-canvas"
       aria-hidden="true"
-      dpr={[1, 2]}
+      dpr={[1, 1.5]}
       frameloop={frameloop}
-      camera={{ position: [0, 0, 5.2], fov: 48, near: 0.1, far: 30 }}
+      camera={{ position: [0, 0, 5.2], fov: 58, near: 0.1, far: 30 }}
       gl={{
         antialias: true,
         alpha: false,
@@ -43,6 +43,12 @@ export function AiVisualizerCanvas({
         toneMappingExposure: 1.15,
       }}
       style={{ background: VISUALIZER_COLORS.bg }}
+      onCreated={({ gl }) => {
+        const canvas = gl.domElement
+        canvas.addEventListener('webglcontextlost', (event) => {
+          event.preventDefault()
+        })
+      }}
     >
       <Suspense fallback={null}>
         <TunnelScene activity={activity} mouse={mouse} reducedMotion={reducedMotion} />
