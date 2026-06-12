@@ -63,7 +63,7 @@ from tools_engine import (
     read_tool_requirements,
     read_tool_test,
     tool_exists,
-    validate_tool_module,
+    validate_tool_schema,
 )
 
 configure_logging()
@@ -666,6 +666,8 @@ async def remove_tool(tool_name: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {"status": "deleted", "tool_name": tool_name}
 
 
@@ -958,15 +960,15 @@ async def approve_tool(request: Request, payload: dict = Body(...)) -> Streaming
         validation_failed = False
         validation_reason = ""
         for val_attempt in range(PHASE_MAX_RETRIES):
-            module_ok = validate_tool_module(tool_code)
+            schema_ok, schema_reason = validate_tool_schema(tool_code)
             test_ok, test_reason = validate_test_code(test_code)
-            if module_ok and test_ok:
+            if schema_ok and test_ok:
                 validation_failed = False
                 break
 
             errors: list[str] = []
-            if not module_ok:
-                errors.append("Generated tool code is missing get_tool_schema() or run().")
+            if not schema_ok:
+                errors.append(schema_reason)
             if not test_ok:
                 errors.append(test_reason)
             validation_reason = "; ".join(errors)

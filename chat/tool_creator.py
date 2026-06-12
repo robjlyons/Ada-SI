@@ -9,6 +9,8 @@ from litellm_client import build_completion_payload, stream_completion_deltas
 from debug_log import log_block, log_debug, log_generated_code, log_plan, log_stream_delta
 from tools_engine import validate_tool_module
 
+TOOL_CREATOR_REASONING_EFFORT = "high"
+
 PLAN_SYSTEM_PROMPT = """You are an expert Python tool architect for a self-improving AI agent.
 
 The user needs a new callable tool. Produce a clear implementation plan in markdown with these sections:
@@ -50,6 +52,7 @@ Rules:
 - test_run.py must exit 0 on success
 - No network, filesystem outside /workspace, or subprocess calls in generated tools during tests
 - Keep tools minimal and focused
+- In tool_code Python source use Python literals True, False, and None — never JSON true, false, or null
 - JSON string values MUST be valid JSON: escape every double quote inside code as \\", newlines as \\n, backslashes as \\\\
 - ALL file paths in run() return values MUST use the /workspace/ prefix (never /app/custom_tools/)
 - test_code MUST use this exact load pattern and mock external calls:
@@ -92,6 +95,7 @@ Respond with ONLY valid JSON (no markdown fences) in this shape:
 
 Rules:
 - Preserve tool_name as the module filename stem
+- In tool_code Python source use Python literals True, False, and None — never JSON true, false, or null
 - requirements: full list of PyPI packages needed after your edit (not just new ones)
 - test_code runs in sandbox at /workspace/{tool_name}.py with mocks for network/filesystem
 - ALL file paths in run() return values MUST use /workspace/ prefix
@@ -119,6 +123,7 @@ Return ONLY valid JSON (no markdown fences):
 
 Rules:
 - tool_code must define get_tool_schema() and run()
+- get_tool_schema() must use Python True, False, and None — never JSON true, false, or null
 - test_code loads tool from /workspace/{tool_name}.py via importlib
 - requirements is a list of PyPI package strings (or [])
 - ALL file paths in run() returns use /workspace/ prefix
@@ -131,6 +136,7 @@ Return ONLY valid JSON (no markdown fences):
 
 Rules:
 - tool_code MUST define get_tool_schema() and run()
+- get_tool_schema() must use Python True, False, and None — never JSON true, false, or null
 - test_code MUST load via importlib from /workspace/{tool_name}.py and include tests/mocks
 - ALL file paths in run() return values use /workspace/ prefix
 - Fix only what validation requires; keep behavior from the plan"""
@@ -158,7 +164,11 @@ async def _litellm_chat(
     temperature: float = 0.2,
 ) -> str:
     payload = build_completion_payload(
-        model, messages, stream=False, temperature=temperature
+        model,
+        messages,
+        stream=False,
+        temperature=temperature,
+        reasoning_effort=TOOL_CREATOR_REASONING_EFFORT,
     )
     async with httpx.AsyncClient(timeout=120.0) as client:
         response = await client.post(
@@ -184,7 +194,12 @@ async def _litellm_stream(
 ) -> AsyncIterator[tuple[str, str]]:
     """Yield (kind, text) where kind is 'content' or 'reasoning'."""
     async for kind, text in stream_completion_deltas(
-        litellm_url, headers, model, messages, temperature=temperature
+        litellm_url,
+        headers,
+        model,
+        messages,
+        temperature=temperature,
+        reasoning_effort=TOOL_CREATOR_REASONING_EFFORT,
     ):
         yield kind, text
 

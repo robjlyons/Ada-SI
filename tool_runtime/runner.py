@@ -2,6 +2,7 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +12,18 @@ logger = logging.getLogger(__name__)
 TOOLS_DIR = Path(os.environ.get("TOOLS_DIR", "/app/custom_tools"))
 VENV_PATH = Path(os.environ.get("VENV_PATH", "/app/venv"))
 MANIFEST_PATH = TOOLS_DIR / ".venv_manifest.json"
+
+_JSON_LITERAL_PATTERNS = (
+    (re.compile(r"(?<=[:\[,])\s*false\b(?=\s*[,}\]])"), "False"),
+    (re.compile(r"(?<=[:\[,])\s*true\b(?=\s*[,}\]])"), "True"),
+    (re.compile(r"(?<=[:\[,])\s*null\b(?=\s*[,}\]])"), "None"),
+)
+
+
+def sanitize_python_json_literals(code: str) -> str:
+    for pattern, replacement in _JSON_LITERAL_PATTERNS:
+        code = pattern.sub(replacement, code)
+    return code
 
 
 def venv_python() -> Path:
@@ -218,6 +231,7 @@ def install_tool(
     skip_pip: bool = False,
 ) -> tuple[bool, str]:
     TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+    tool_code = sanitize_python_json_literals(tool_code)
     (TOOLS_DIR / f"{tool_name}.py").write_text(tool_code, encoding="utf-8")
     req_file = TOOLS_DIR / f"{tool_name}.requirements.txt"
     reqs = normalize_requirements(requirements)
@@ -239,9 +253,16 @@ def install_tool(
 
 
 def delete_tool(tool_name: str) -> None:
-    for path in (
+    paths = [
         TOOLS_DIR / f"{tool_name}.py",
         TOOLS_DIR / f"{tool_name}.requirements.txt",
-    ):
-        if path.exists():
-            path.unlink()
+        TOOLS_DIR / f"{tool_name}.test.py",
+    ]
+    for path in paths:
+        path.unlink(missing_ok=True)
+
+    pycache = TOOLS_DIR / "__pycache__"
+    if pycache.is_dir():
+        for pattern in (f"{tool_name}.cpython-*.pyc", f"{tool_name}.test.cpython-*.pyc"):
+            for cached in pycache.glob(pattern):
+                cached.unlink(missing_ok=True)

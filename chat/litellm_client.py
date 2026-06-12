@@ -23,6 +23,7 @@ def build_completion_payload(
     stream: bool,
     tools: list[dict] | None = None,
     temperature: float = 0.2,
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
@@ -34,7 +35,7 @@ def build_completion_payload(
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
     if is_gemini_model(model):
-        payload["reasoning_effort"] = "low"
+        payload["reasoning_effort"] = reasoning_effort or "low"
     return payload
 
 
@@ -137,6 +138,7 @@ async def stream_chat_completion(
     *,
     tools: list[dict] | None = None,
     temperature: float = 0.2,
+    reasoning_effort: str | None = None,
 ) -> AsyncIterator[dict]:
     payload = build_completion_payload(
         model,
@@ -144,6 +146,7 @@ async def stream_chat_completion(
         stream=True,
         tools=tools,
         temperature=temperature,
+        reasoning_effort=reasoning_effort,
     )
     async with httpx.AsyncClient(timeout=120.0) as client:
         async with client.stream(
@@ -178,6 +181,7 @@ async def stream_completion_deltas(
     *,
     tools: list[dict] | None = None,
     temperature: float = 0.2,
+    reasoning_effort: str | None = None,
 ) -> AsyncIterator[tuple[str, str]]:
     """Yield (kind, text) where kind is 'reasoning' or 'content'."""
     async for chunk in stream_chat_completion(
@@ -187,6 +191,7 @@ async def stream_completion_deltas(
         messages,
         tools=tools,
         temperature=temperature,
+        reasoning_effort=reasoning_effort,
     ):
         delta = extract_stream_delta(chunk)
         if delta["reasoning"]:

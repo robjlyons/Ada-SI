@@ -2,6 +2,8 @@ import ast
 import asyncio
 import json
 import logging
+import re
+import types
 from pathlib import Path
 
 from runtime_client import (
@@ -107,6 +109,33 @@ def tool_exists(tool_name: str) -> bool:
     return (TOOLS_DIR / f"{tool_name}.py").exists()
 
 
+_JSON_LITERAL_PATTERNS = (
+    (re.compile(r"(?<=[:\[,])\s*false\b(?=\s*[,}\]])"), "False"),
+    (re.compile(r"(?<=[:\[,])\s*true\b(?=\s*[,}\]])"), "True"),
+    (re.compile(r"(?<=[:\[,])\s*null\b(?=\s*[,}\]])"), "None"),
+)
+
+
+def sanitize_python_json_literals(code: str) -> str:
+    """Replace JSON-style true/false/null that LLMs often emit inside Python dict literals."""
+    for pattern, replacement in _JSON_LITERAL_PATTERNS:
+        code = pattern.sub(replacement, code)
+    return code
+
+
+def _exec_tool_module_from_source(source: str, module_name: str):
+    source = sanitize_python_json_literals(source)
+    mod = types.ModuleType(module_name)
+    mod.__file__ = f"{module_name}.py"
+    exec(compile(source, mod.__file__, "exec"), mod.__dict__)
+    return mod
+
+
+def _schema_name_and_description(schema: dict) -> tuple[str, str]:
+    fn = schema.get("function", schema)
+    return fn.get("name", ""), fn.get("description", "")
+
+
 def prepare_agent_messages(messages: list[dict]) -> list[dict]:
     user_system_parts: list[str] = []
     rest: list[dict] = []
@@ -128,18 +157,14 @@ def prepare_agent_messages(messages: list[dict]) -> list[dict]:
 
 
 def _load_local_schemas() -> list[dict]:
-    import importlib.util
-
     schemas: list[dict] = []
     for file in sorted(TOOLS_DIR.glob("*.py")):
-        if file.name.startswith("__"):
+        if file.name.startswith("__") or file.name.endswith(".test.py"):
             continue
         try:
-            spec = importlib.util.spec_from_file_location(file.stem, file)
-            if spec is None or spec.loader is None:
-                continue
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
+            mod = _exec_tool_module_from_source(
+                file.read_text(encoding="utf-8"), file.stem
+            )
             if hasattr(mod, "get_tool_schema"):
                 schemas.append(mod.get_tool_schema())
         except Exception as exc:
@@ -179,14 +204,18 @@ def load_dynamic_tools() -> list[dict]:
 
 async def aload_dynamic_tools() -> list[dict]:
     tools = [GENERATE_NEW_TOOL_SCHEMA, EDIT_EXISTING_TOOL_SCHEMA]
+    runtime_loaded = False
     try:
         runtime_tools = await fetch_runtime_tools()
         for item in runtime_tools:
             schema = item.get("schema")
             if schema:
                 tools.append(schema)
+                runtime_loaded = True
     except Exception as exc:
         logger.warning("Runtime tool list failed, falling back to local: %s", exc)
+
+    if not runtime_loaded:
         tools.extend(_load_local_schemas())
     return tools
 
@@ -194,13 +223,20 @@ async def aload_dynamic_tools() -> list[dict]:
 async def alist_tool_summaries() -> list[dict[str, str]]:
     try:
         runtime_tools = await fetch_runtime_tools()
-        return [
-            {"name": t["name"], "description": t.get("description", "")}
-            for t in runtime_tools
-        ]
+        if runtime_tools:
+            return [
+                {"name": t["name"], "description": t.get("description", "")}
+                for t in runtime_tools
+            ]
     except Exception as exc:
         logger.warning("Runtime summaries failed: %s", exc)
-        return []
+
+    summaries: list[dict[str, str]] = []
+    for schema in _load_local_schemas():
+        name, description = _schema_name_and_description(schema)
+        if name:
+            summaries.append({"name": name, "description": description})
+    return summaries
 
 
 def list_tool_summaries() -> list[dict[str, str]]:
@@ -248,6 +284,23 @@ def validate_tool_module(code: str) -> bool:
     return "get_tool_schema" in names and "run" in names
 
 
+def validate_tool_schema(code: str) -> tuple[bool, str]:
+    code = sanitize_python_json_literals(code)
+    if not validate_tool_module(code):
+        return False, "Generated tool code is missing get_tool_schema() or run()."
+    try:
+        mod = _exec_tool_module_from_source(code, "tool_validation_mod")
+        schema = mod.get_tool_schema()
+        if not isinstance(schema, dict):
+            return False, "get_tool_schema() must return a dict."
+        name, _ = _schema_name_and_description(schema)
+        if not name:
+            return False, "Tool schema is missing a name."
+        return True, ""
+    except Exception as exc:
+        return False, f"get_tool_schema() failed: {exc}"
+
+
 def read_tool_test(tool_name: str) -> str:
     path = TOOLS_DIR / f"{tool_name}.test.py"
     if not path.exists():
@@ -261,8 +314,10 @@ def write_tool_files(
     requirements: list[str] | None = None,
     test_code: str = "",
 ) -> Path:
-    if not validate_tool_module(code):
-        raise ValueError("Tool code must define get_tool_schema() and run().")
+    code = sanitize_python_json_literals(code)
+    schema_ok, schema_reason = validate_tool_schema(code)
+    if not schema_ok:
+        raise ValueError(schema_reason)
 
     target = TOOLS_DIR / f"{tool_name}.py"
     target.write_text(code, encoding="utf-8")
@@ -289,17 +344,23 @@ async def delete_tool_async(tool_name: str) -> None:
         raise ValueError(f"Invalid tool name: {tool_name}")
 
     target = TOOLS_DIR / f"{tool_name}.py"
-    if not target.exists():
+    req_path = TOOLS_DIR / f"{tool_name}.requirements.txt"
+    test_path = TOOLS_DIR / f"{tool_name}.test.py"
+    tool_paths = (target, req_path, test_path)
+
+    if not any(path.exists() for path in tool_paths):
         raise FileNotFoundError(f"Tool '{tool_name}' not found.")
 
     await runtime_delete_tool(tool_name)
-    req_path = TOOLS_DIR / f"{tool_name}.requirements.txt"
-    if req_path.exists():
-        req_path.unlink()
-    test_path = TOOLS_DIR / f"{tool_name}.test.py"
-    if test_path.exists():
-        test_path.unlink()
-    target.unlink()
+
+    for path in tool_paths:
+        path.unlink(missing_ok=True)
+
+    pycache = TOOLS_DIR / "__pycache__"
+    if pycache.is_dir():
+        for pattern in (f"{tool_name}.cpython-*.pyc", f"{tool_name}.test.cpython-*.pyc"):
+            for cached in pycache.glob(pattern):
+                cached.unlink(missing_ok=True)
 
 
 def delete_tool(tool_name: str) -> None:
