@@ -1,11 +1,15 @@
 import { motion } from 'framer-motion'
 
 export function Welcome() {
-  const chips = ['Ask a question', 'Forge a new skill', 'Run an installed skill']
+  const chips = ['Ask a question', 'Request a new tool', 'Run an installed tool']
 
   return (
     <div className="welcome">
-      <p className="welcome-tagline">Bond with ADA through conversation and skill forging.</p>
+      <div className="welcome-mark" aria-hidden="true">
+        A
+      </div>
+      <h2>What would you like to build?</h2>
+      <p>Chat with the lite model or request new tools for the agent to create.</p>
       <div className="welcome-chips">
         {chips.map((chip, index) => (
           <motion.span

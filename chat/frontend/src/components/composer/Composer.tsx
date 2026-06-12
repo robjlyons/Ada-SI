@@ -1,5 +1,4 @@
 import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
-import { audioManager } from '../../audio/AudioManager'
 import { MAX_TEXTAREA_ROWS } from '../../constants'
 import { useChatStream } from '../../hooks/useChatStream'
 import { useAppStore } from '../../state/store'
@@ -26,7 +25,6 @@ export function Composer() {
     if (isSending) return
     const content = input.trim()
     if (!content) return
-    audioManager.unlock()
     setInput('')
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
@@ -52,7 +50,7 @@ export function Composer() {
           <textarea
             ref={textareaRef}
             rows={1}
-            placeholder="Speak to ADA…"
+            placeholder="Message the model..."
             value={input}
             disabled={isSending}
             onChange={(e) => {

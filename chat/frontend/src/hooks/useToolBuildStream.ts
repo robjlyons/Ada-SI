@@ -2,7 +2,6 @@ import { useCallback } from 'react'
 import { rejectPip, rejectTool } from '../api/client'
 import { consumeBuildStream, consumeSseStream } from '../api/sse'
 import { VIEWER_PHASES } from '../constants'
-import { awardPlanApprovedXp } from '../state/progressionActions'
 import { useAppStore } from '../state/store'
 import { isAdaEvent, type AdaEvent } from '../types/events'
 
@@ -135,7 +134,6 @@ export function useToolBuildStream() {
       store.enterBuildingMode(cardId, toolName)
       store.updateToolPlanCard(cardId, { busy: true, showRetry: false })
       store.setStatus('')
-      awardPlanApprovedXp()
 
       try {
         const response = await fetch('/api/approve_tool', {
