@@ -5,6 +5,7 @@ import { ModelToolbar } from '../toolbar/ModelToolbar'
 import { Messages } from '../chat/Messages'
 import { Composer } from '../composer/Composer'
 import { EffectsLayer } from '../effects/EffectsLayer'
+import { SettingsModal } from '../settings/SettingsModal'
 
 export function AppShell() {
   const feed = useAppStore((s) => s.feed)
@@ -35,6 +36,7 @@ export function AppShell() {
         <SidePanel />
       </div>
       <EffectsLayer />
+      <SettingsModal />
     </div>
   )
 }

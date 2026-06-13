@@ -6,6 +6,11 @@ import re
 import types
 from pathlib import Path
 
+from prompts_config import (
+    get_scout_orchestrator_prompt,
+    get_tool_edit_existing_description,
+    get_tool_generate_new_description,
+)
 from runtime_client import (
     diff_new_requirements,
     fetch_runtime_manifest,
@@ -23,72 +28,56 @@ logger = logging.getLogger(__name__)
 TOOLS_DIR = Path(__file__).parent / "custom_tools"
 TOOLS_DIR.mkdir(exist_ok=True)
 
-ORCHESTRATOR_SYSTEM_PROMPT = """You are Ada-SI, a self-improving agent that extends itself by creating Python tools.
 
-Routing rules (follow strictly):
-1. If the user needs live or external data you cannot access directly — weather, stock prices, news, web lookups, account/system state, file I/O, scheduled jobs, or any API — call generate_new_tool. Do NOT reply with "I can't" or ask clarifying questions instead of calling the tool; put requirements (APIs, inputs, outputs) in the tool description.
-2. If an installed tool matches the request, call that tool first. Pass whatever arguments you have; the tool may return follow-up questions.
-3. If the user asks to fix, change, or improve an existing installed tool, call edit_existing_tool with the tool name and a detailed description of the changes.
-4. Reply in plain text only for general conversation, explanations, or static knowledge that needs no live data and no custom code.
-
-When calling generate_new_tool or edit_existing_tool, use snake_case tool_name and a detailed description the tool creator can implement without further user input when possible."""
-
-GENERATE_NEW_TOOL_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "generate_new_tool",
-        "description": (
-            "Request creation of a new Python tool when the user needs a capability you do "
-            "not have installed: live/real-time data (weather, markets, news), external APIs, "
-            "web fetching, persistence, filesystem access, or custom automation. Call this "
-            "instead of asking the user for details you could specify in description. "
-            "Do not use for pure chat or static facts answerable without tools or APIs."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "tool_name": {
-                    "type": "string",
-                    "description": "Snake_case name for the new tool module.",
+def build_generate_new_tool_schema() -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": "generate_new_tool",
+            "description": get_tool_generate_new_description(),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tool_name": {
+                        "type": "string",
+                        "description": "Snake_case name for the new tool module.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": (
+                            "Detailed explanation of what the tool should do, its inputs, "
+                            "and expected outputs."
+                        ),
+                    },
                 },
-                "description": {
-                    "type": "string",
-                    "description": (
-                        "Detailed explanation of what the tool should do, its inputs, "
-                        "and expected outputs."
-                    ),
-                },
+                "required": ["tool_name", "description"],
             },
-            "required": ["tool_name", "description"],
         },
-    },
-}
+    }
 
-EDIT_EXISTING_TOOL_SCHEMA = {
-    "type": "function",
-    "function": {
-        "name": "edit_existing_tool",
-        "description": (
-            "Modify an installed tool when the user wants to fix bugs, change behavior, "
-            "add inputs/outputs, or update dependencies. Use when a tool exists but needs "
-            "changes — not for creating a brand-new capability under a new name."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "tool_name": {
-                    "type": "string",
-                    "description": "Snake_case name of the existing installed tool.",
+
+def build_edit_existing_tool_schema() -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": "edit_existing_tool",
+            "description": get_tool_edit_existing_description(),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tool_name": {
+                        "type": "string",
+                        "description": "Snake_case name of the existing installed tool.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Detailed description of the requested changes.",
+                    },
                 },
-                "description": {
-                    "type": "string",
-                    "description": "Detailed description of the requested changes.",
-                },
+                "required": ["tool_name", "description"],
             },
-            "required": ["tool_name", "description"],
         },
-    },
-}
+    }
 
 
 def read_tool_file(tool_name: str) -> str:
@@ -155,23 +144,13 @@ def _schema_name_and_description(schema: dict) -> tuple[str, str]:
 
 
 def prepare_agent_messages(messages: list[dict]) -> list[dict]:
-    user_system_parts: list[str] = []
     rest: list[dict] = []
     for msg in messages:
         if msg.get("role") == "system":
-            content = (msg.get("content") or "").strip()
-            if content:
-                user_system_parts.append(content)
-        else:
-            rest.append(msg)
+            continue
+        rest.append(msg)
 
-    system_content = ORCHESTRATOR_SYSTEM_PROMPT
-    if user_system_parts:
-        system_content += (
-            "\n\nAdditional user instructions:\n" + "\n\n".join(user_system_parts)
-        )
-
-    return [{"role": "system", "content": system_content}, *rest]
+    return [{"role": "system", "content": get_scout_orchestrator_prompt()}, *rest]
 
 
 def _load_local_schemas() -> list[dict]:
@@ -191,7 +170,7 @@ def _load_local_schemas() -> list[dict]:
 
 
 def load_dynamic_tools() -> list[dict]:
-    tools = [GENERATE_NEW_TOOL_SCHEMA, EDIT_EXISTING_TOOL_SCHEMA]
+    tools = [build_generate_new_tool_schema(), build_edit_existing_tool_schema()]
     try:
         runtime_tools = asyncio.get_event_loop().run_until_complete(fetch_runtime_tools())
         for item in runtime_tools:
@@ -221,7 +200,7 @@ def load_dynamic_tools() -> list[dict]:
 
 
 async def aload_dynamic_tools() -> list[dict]:
-    tools = [GENERATE_NEW_TOOL_SCHEMA, EDIT_EXISTING_TOOL_SCHEMA]
+    tools = [build_generate_new_tool_schema(), build_edit_existing_tool_schema()]
     runtime_loaded = False
     try:
         runtime_tools = await fetch_runtime_tools()

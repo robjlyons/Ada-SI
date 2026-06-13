@@ -1,3 +1,5 @@
 {
-  "approved_packages": []
+  "approved_packages": [
+    "pyttsx3>=2.90"
+  ]
 }

@@ -50,6 +50,12 @@ services:
       - ./chat/staging:/app/staging
       # Bind-mount built static for local iteration (run `npm run build` in chat/frontend first)
       - ./chat/static:/app/static
+      # Bind-mount backend sources for local iteration without rebuilding the image
+      - ./chat/app.py:/app/app.py
+      - ./chat/prompts_config.py:/app/prompts_config.py
+      - ./chat/forger_guidance.py:/app/forger_guidance.py
+      - ./chat/tools_engine.py:/app/tools_engine.py
+      - ./chat/tool_creator.py:/app/tool_creator.py
     environment:
       - LITELLM_URL=http://litellm:4000
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}

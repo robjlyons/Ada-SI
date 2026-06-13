@@ -1,4 +1,11 @@
-import type { AppConfig, ModelsResponse, PipPackage, ToolSummary } from '../types/events'
+import type {
+  AppConfig,
+  ModelsResponse,
+  PipPackage,
+  PromptsConfig,
+  PromptsResponse,
+  ToolSummary,
+} from '../types/events'
 import { parseErrorMessage } from '../utils/text'
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -7,6 +14,22 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
     throw new Error(parseErrorMessage(await response.text()))
   }
   return response.json() as Promise<T>
+}
+
+export async function fetchPrompts(): Promise<PromptsResponse> {
+  return requestJson<PromptsResponse>('/api/prompts')
+}
+
+export async function savePrompts(prompts: PromptsConfig): Promise<PromptsResponse> {
+  return requestJson<PromptsResponse>('/api/prompts', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompts }),
+  })
+}
+
+export async function resetPrompts(): Promise<PromptsResponse> {
+  return requestJson<PromptsResponse>('/api/prompts/reset', { method: 'POST' })
 }
 
 export async function fetchConfig(): Promise<AppConfig> {

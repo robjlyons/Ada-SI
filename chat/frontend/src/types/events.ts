@@ -14,6 +14,47 @@ export type PipPackage = {
   used_by?: string[]
 }
 
+export type PromptsConfig = {
+  scout_orchestrator_prefix: string
+  scout_orchestrator_suffix: string
+  scout_additional_directives: string
+  forge_runtime_context: string
+  forge_plan_prompt: string
+  forge_revise_plan_prompt: string
+  forge_edit_plan_prompt: string
+  forge_code_prompt: string
+  forge_edit_code_prompt: string
+  forge_fix_test_prompt: string
+  forge_fix_codegen_prompt: string
+  forge_fix_validation_prompt: string
+  forge_fix_runtime_prompt: string
+  tool_generate_new_description: string
+  tool_edit_existing_description: string
+}
+
+export type EffectivePrompts = {
+  scout_orchestrator: string
+  forge_plan: string
+  forge_revise_plan: string
+  forge_edit_plan: string
+  forge_code: string
+  forge_edit_code: string
+  forge_fix_test: string
+  forge_fix_codegen: string
+  forge_fix_validation: string
+  forge_fix_runtime: string
+}
+
+export type PromptsResponse = {
+  prompts: PromptsConfig
+  effective: EffectivePrompts
+}
+
+/** @deprecated Use PromptsConfig */
+export type ForgerGuidance = {
+  forger_runtime_context: string
+}
+
 export type AppConfig = {
   lite_model?: string
   tool_creator_model?: string

@@ -10,6 +10,13 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from prompts_config import (
+    PROMPT_KEYS,
+    default_prompts_config,
+    load_prompts_config,
+    prompts_config_response,
+    save_prompts_config,
+)
 from build_pipeline import (
     PENDING_PIP_INSTALLS,
     PHASE_MAX_RETRIES,
@@ -762,6 +769,61 @@ async def get_config() -> dict:
         "lite_model_reasoning_effort": LITE_MODEL_REASONING_EFFORT or "low",
         "tool_creator_reasoning_effort": TOOL_CREATOR_REASONING_EFFORT,
     }
+
+
+@app.get("/api/prompts")
+async def get_prompts() -> dict:
+    return prompts_config_response()
+
+
+@app.put("/api/prompts")
+async def update_prompts(payload: dict = Body(...)) -> dict:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+    prompts = payload.get("prompts", payload)
+    if not isinstance(prompts, dict):
+        raise HTTPException(status_code=400, detail="Expected a prompts object.")
+    unknown = [key for key in prompts if key not in PROMPT_KEYS]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown prompt keys: {', '.join(unknown)}",
+        )
+    save_prompts_config({**load_prompts_config(), **prompts})
+    return prompts_config_response()
+
+
+@app.post("/api/prompts/reset")
+async def reset_prompts() -> dict:
+    save_prompts_config(default_prompts_config())
+    return prompts_config_response()
+
+
+@app.get("/api/forger-guidance")
+async def get_forger_guidance() -> dict:
+    config = load_prompts_config()
+    return {"forger_runtime_context": config["forge_runtime_context"]}
+
+
+@app.put("/api/forger-guidance")
+async def update_forger_guidance(payload: dict = Body(...)) -> dict:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+    mapped = {"forge_runtime_context": payload.get("forger_runtime_context", "")}
+    save_prompts_config({**load_prompts_config(), **mapped})
+    return await get_forger_guidance()
+
+
+@app.post("/api/forger-guidance/reset")
+async def reset_forger_guidance() -> dict:
+    defaults = default_prompts_config()
+    save_prompts_config(
+        {
+            **load_prompts_config(),
+            "forge_runtime_context": defaults["forge_runtime_context"],
+        }
+    )
+    return await get_forger_guidance()
 
 
 @app.get("/api/tools")

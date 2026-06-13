@@ -4,7 +4,6 @@ export const THINKING_EFFORT_STORAGE_KEY = 'ada-thinking-effort'
 
 export const CHAT_MODEL_STORAGE_KEY = 'ada-si-chat-model'
 export const SECOND_MODEL_STORAGE_KEY = 'ada-si-second-model'
-export const SYSTEM_STORAGE_KEY = 'ada-si-system-instructions'
 export const SCROLL_THRESHOLD = 80
 export const MAX_TEXTAREA_ROWS = 6
 

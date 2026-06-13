@@ -7,150 +7,18 @@ import httpx
 
 from litellm_client import build_completion_payload, stream_completion_deltas
 from debug_log import log_block, log_debug, log_generated_code, log_plan, log_stream_delta
+from prompts_config import (
+    get_forge_code_prompt,
+    get_forge_edit_code_prompt,
+    get_forge_edit_plan_prompt,
+    get_forge_fix_codegen_prompt,
+    get_forge_fix_runtime_prompt,
+    get_forge_fix_test_prompt,
+    get_forge_fix_validation_prompt,
+    get_forge_plan_prompt,
+    get_forge_revise_plan_prompt,
+)
 from tools_engine import validate_tool_module
-
-PLAN_SYSTEM_PROMPT = """You are an expert Python tool architect for a self-improving AI agent.
-
-The user needs a new callable tool. Produce a clear implementation plan in markdown with these sections:
-## Architecture Changes
-## Function Schema
-## Execution Steps
-## Risks and Limitations
-
-Be specific about inputs, outputs, and edge cases. Do not write full Python code yet."""
-
-REVISE_PLAN_SYSTEM_PROMPT = """You are an expert Python tool architect for a self-improving AI agent.
-
-The user rejected a proposed tool plan and requested revisions. Produce an updated implementation plan in markdown with these sections:
-## Architecture Changes
-## Function Schema
-## Execution Steps
-## Risks and Limitations
-
-Incorporate the user's requested changes while keeping the plan focused and implementable. Do not write full Python code yet."""
-
-CODE_SYSTEM_PROMPT = """You are an expert Python developer building tools for a self-improving AI agent.
-
-Each tool module MUST define exactly:
-1. get_tool_schema() -> dict  (OpenAI-compatible function schema)
-2. run(**kwargs) -> str or JSON-serializable value
-
-Respond with ONLY valid JSON (no markdown fences) in this shape:
-{
-  "tool_code": "<full Python module source>",
-  "test_code": "<test_run.py that imports /workspace/{tool_name}.py and asserts run() works>",
-  "requirements": ["optional-pip-package>=1.0"]
-}
-
-Rules:
-- requirements: list every PyPI package the tool needs at runtime (e.g. httpx, gTTS). Use [] if only stdlib.
-- Do NOT include pip, setuptools, or wheel in requirements.
-- tool_name must match the module filename stem
-- test_code runs inside python:3.12-slim with the tool mounted at /workspace/{tool_name}.py
-- test_run.py must exit 0 on success
-- No network, filesystem outside /workspace, or subprocess calls in generated tools during tests
-- Keep tools minimal and focused
-- In tool_code Python source use Python literals True, False, and None — never JSON true, false, or null
-- JSON string values MUST be valid JSON: escape every double quote inside code as \\", newlines as \\n, backslashes as \\\\
-- ALL file paths in run() return values MUST use the /workspace/ prefix (never /app/custom_tools/)
-- test_code MUST use this exact load pattern and mock external calls:
-
-import importlib.util
-
-def load_tool():
-    spec = importlib.util.spec_from_file_location(
-        "tool_mod", "/workspace/{tool_name}.py"
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-# Use unittest.mock.patch on network/filesystem/subprocess before calling mod.run().
-# Sandbox has NO network access — never call mod.run() against real URLs without mocks."""
-
-EDIT_PLAN_SYSTEM_PROMPT = """You are an expert Python tool architect for a self-improving AI agent.
-
-The user wants to modify an EXISTING installed tool. Produce an updated implementation plan in markdown with these sections:
-## Architecture Changes
-## Function Schema
-## Execution Steps
-## Risks and Limitations
-
-Reference the current tool behavior and describe only what must change. Do not write full Python code yet."""
-
-EDIT_CODE_SYSTEM_PROMPT = """You are an expert Python developer updating an existing tool for a self-improving AI agent.
-
-Each tool module MUST define exactly:
-1. get_tool_schema() -> dict  (OpenAI-compatible function schema)
-2. run(**kwargs) -> str or JSON-serializable value
-
-Respond with ONLY valid JSON (no markdown fences) in this shape:
-{
-  "tool_code": "<full updated Python module source>",
-  "test_code": "<updated test_run.py>",
-  "requirements": ["optional-pip-package>=1.0"]
-}
-
-Rules:
-- Preserve tool_name as the module filename stem
-- In tool_code Python source use Python literals True, False, and None — never JSON true, false, or null
-- requirements: full list of PyPI packages needed after your edit (not just new ones)
-- test_code runs in sandbox at /workspace/{tool_name}.py with mocks for network/filesystem
-- ALL file paths in run() return values MUST use /workspace/ prefix
-- JSON string values MUST be valid JSON with escaped quotes and newlines"""
-
-FIX_TEST_SYSTEM_PROMPT = """You are an expert Python test engineer fixing sandbox test failures.
-
-The tool module (tool_code) is correct — only fix test_code so it passes in an isolated
-python:3.12-slim container with NO network, NO filesystem outside /workspace, and the tool
-mounted at /workspace/{tool_name}.py.
-
-Respond with ONLY valid JSON (no markdown fences):
-{{ "test_code": "<fixed test_run.py source>" }}
-
-Rules:
-- Use importlib.util.spec_from_file_location to load the tool from /workspace/{tool_name}.py
-- Mock ALL network, filesystem, and subprocess calls with unittest.mock.patch
-- Assert paths using /workspace/ prefix when checking run() return values
-- test_run.py must exit 0 when run as: python /workspace/test_run.py"""
-
-FIX_CODEGEN_SYSTEM_PROMPT = """You repair malformed tool-creator JSON responses.
-
-Return ONLY valid JSON (no markdown fences):
-{{ "tool_code": "...", "test_code": "...", "requirements": [] }}
-
-Rules:
-- tool_code must define get_tool_schema() and run()
-- get_tool_schema() must use Python True, False, and None — never JSON true, false, or null
-- test_code loads tool from /workspace/{tool_name}.py via importlib
-- requirements is a list of PyPI package strings (or [])
-- ALL file paths in run() returns use /workspace/ prefix
-- Escape quotes and newlines properly inside JSON strings"""
-
-FIX_VALIDATION_SYSTEM_PROMPT = """You fix Python tool modules that failed static validation.
-
-Return ONLY valid JSON (no markdown fences):
-{{ "tool_code": "...", "test_code": "..." }}
-
-Rules:
-- tool_code MUST define get_tool_schema() and run()
-- get_tool_schema() must use Python True, False, and None — never JSON true, false, or null
-- test_code MUST load via importlib from /workspace/{tool_name}.py and include tests/mocks
-- ALL file paths in run() return values use /workspace/ prefix
-- Fix only what validation requires; keep behavior from the plan"""
-
-FIX_RUNTIME_SYSTEM_PROMPT = """You fix tool_code and/or test_code failures in the persistent tool runtime.
-
-Tests run with cwd=/app/custom_tools and /workspace symlinked to the same directory.
-Load tools via importlib from /workspace/{tool_name}.py.
-
-Respond with ONLY valid JSON (no markdown fences):
-{{ "tool_code": "...", "test_code": "..." }}
-
-Rules:
-- Fix path mismatches: use /workspace/ in run() return values AND test assertions
-- Mock network/subprocess in test_code; runtime has network but tests must not call live APIs
-- tool_code must keep get_tool_schema() and run()"""
 
 
 async def _litellm_chat(
@@ -219,7 +87,7 @@ async def draft_tool_plan_stream(
         f"Requirements:\n{description}"
     )
     messages = [
-        {"role": "system", "content": PLAN_SYSTEM_PROMPT},
+        {"role": "system", "content": get_forge_plan_prompt()},
         {"role": "user", "content": user_content},
     ]
     log_block(
@@ -255,7 +123,7 @@ async def draft_tool_edit_plan_stream(
         f"Current requirements: {existing_requirements}"
     )
     messages = [
-        {"role": "system", "content": EDIT_PLAN_SYSTEM_PROMPT},
+        {"role": "system", "content": get_forge_edit_plan_prompt()},
         {"role": "user", "content": user_content},
     ]
     log_block(
@@ -292,7 +160,7 @@ async def revise_tool_plan_stream(
         f"Produce a revised plan that addresses the user's feedback."
     )
     messages = [
-        {"role": "system", "content": REVISE_PLAN_SYSTEM_PROMPT},
+        {"role": "system", "content": get_forge_revise_plan_prompt()},
         {"role": "user", "content": user_content},
     ]
     log_block(run_id, "PLAN", f"revise request tool={tool_name}", feedback)
@@ -461,7 +329,7 @@ async def repair_generated_tool_response(
     messages = [
         {
             "role": "system",
-            "content": FIX_CODEGEN_SYSTEM_PROMPT.replace("{tool_name}", tool_name),
+            "content": get_forge_fix_codegen_prompt().replace("{tool_name}", tool_name),
         },
         {"role": "user", "content": user_content},
     ]
@@ -503,7 +371,7 @@ async def fix_validation_errors(
     messages = [
         {
             "role": "system",
-            "content": FIX_VALIDATION_SYSTEM_PROMPT.replace("{tool_name}", tool_name),
+            "content": get_forge_fix_validation_prompt().replace("{tool_name}", tool_name),
         },
         {"role": "user", "content": user_content},
     ]
@@ -552,7 +420,7 @@ async def fix_runtime_failure(
     messages = [
         {
             "role": "system",
-            "content": FIX_RUNTIME_SYSTEM_PROMPT.replace("{tool_name}", tool_name),
+            "content": get_forge_fix_runtime_prompt().replace("{tool_name}", tool_name),
         },
         {"role": "user", "content": user_content},
     ]
@@ -601,7 +469,7 @@ async def fix_test_code(
     messages = [
         {
             "role": "system",
-            "content": FIX_TEST_SYSTEM_PROMPT.replace("{tool_name}", tool_name),
+            "content": get_forge_fix_test_prompt().replace("{tool_name}", tool_name),
         },
         {"role": "user", "content": user_content},
     ]
@@ -646,7 +514,7 @@ async def generate_tool_code_stream(
             f"Current requirements: {edit_context.get('requirements', [])}\n\n"
             f"Produce updated tool_code, test_code, and requirements."
         )
-        system_prompt = EDIT_CODE_SYSTEM_PROMPT.replace("{tool_name}", tool_name)
+        system_prompt = get_forge_edit_code_prompt().replace("{tool_name}", tool_name)
     else:
         user_content = (
             f"Tool name: `{tool_name}`\n\n"
@@ -654,7 +522,7 @@ async def generate_tool_code_stream(
             f"Generate tool_code, test_code, and requirements. The tool file will be saved as {tool_name}.py "
             f"and mounted in the sandbox at /workspace/{tool_name}.py."
         )
-        system_prompt = CODE_SYSTEM_PROMPT.replace("{tool_name}", tool_name)
+        system_prompt = get_forge_code_prompt().replace("{tool_name}", tool_name)
 
     messages = [
         {"role": "system", "content": system_prompt},

@@ -4,19 +4,21 @@ import {
   CHAT_MODEL_STORAGE_KEY,
   PROGRESSION_STORAGE_KEY,
   SECOND_MODEL_STORAGE_KEY,
-  SYSTEM_STORAGE_KEY,
   THINKING_EFFORT_STORAGE_KEY,
   VIEWER_PHASES,
 } from '../constants'
+import { EMPTY_PROMPTS, createEmptyEffectivePrompts } from '../components/toolbar/promptSections'
 import type {
   AppConfig,
   AssistantFeedItem,
+  EffectivePrompts,
   FeedItem,
   PhaseStatus,
   PipPackage,
   ProcessRun,
   ProcessStep,
   ProcessStepStatus,
+  PromptsConfig,
   ToolPlanCardState,
   ToolPlanFeedItem,
   ToolSummary,
@@ -37,6 +39,12 @@ import {
 } from './progression'
 
 type SidePanelTab = 'tools' | 'packages'
+
+type PromptsSaveState =
+  | { status: 'idle' }
+  | { status: 'saving' }
+  | { status: 'saved' }
+  | { status: 'error'; message: string }
 
 export type PlayerProgress = {
   totalXp: number
@@ -66,8 +74,10 @@ type AppState = {
   chatModel: string
   toolCreatorModel: string
   thinkingEffort: ReasoningEffort
-  systemInstructions: string
-  systemPanelOpen: boolean
+  prompts: PromptsConfig
+  effectivePrompts: EffectivePrompts
+  settingsOpen: boolean
+  promptsSaveState: PromptsSaveState
   conversation: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>
   feed: FeedItem[]
   processRuns: ProcessRun[]
@@ -91,8 +101,9 @@ type AppState = {
   setChatModel: (model: string) => void
   setToolCreatorModel: (model: string) => void
   setThinkingEffort: (effort: ReasoningEffort) => void
-  setSystemInstructions: (text: string) => void
-  setSystemPanelOpen: (open: boolean) => void
+  setPrompts: (prompts: PromptsConfig, effective: EffectivePrompts) => void
+  setSettingsOpen: (open: boolean) => void
+  setPromptsSaveState: (status: PromptsSaveState['status'], message?: string) => void
   setStatus: (text: string, isError?: boolean) => void
   setIsSending: (active: boolean) => void
   setActiveSidePanelTab: (tab: SidePanelTab) => void
@@ -200,8 +211,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatModel: loadStorage(CHAT_MODEL_STORAGE_KEY),
   toolCreatorModel: loadStorage(SECOND_MODEL_STORAGE_KEY),
   thinkingEffort: normalizeReasoningEffort(loadStorage(THINKING_EFFORT_STORAGE_KEY)),
-  systemInstructions: loadStorage(SYSTEM_STORAGE_KEY),
-  systemPanelOpen: Boolean(loadStorage(SYSTEM_STORAGE_KEY)),
+  prompts: EMPTY_PROMPTS,
+  effectivePrompts: createEmptyEffectivePrompts(),
+  settingsOpen: false,
+  promptsSaveState: { status: 'idle' },
   conversation: [],
   feed: [],
   processRuns: [],
@@ -234,11 +247,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     localStorage.setItem(THINKING_EFFORT_STORAGE_KEY, effort)
     set({ thinkingEffort: effort })
   },
-  setSystemInstructions: (text) => {
-    localStorage.setItem(SYSTEM_STORAGE_KEY, text)
-    set({ systemInstructions: text })
-  },
-  setSystemPanelOpen: (open) => set({ systemPanelOpen: open }),
+  setPrompts: (prompts, effective) => set({ prompts, effectivePrompts: effective }),
+  setSettingsOpen: (open) => set({ settingsOpen: open }),
+  setPromptsSaveState: (status, message = '') =>
+    set({
+      promptsSaveState: status === 'error' ? { status, message } : { status },
+    }),
   setStatus: (text, isError = false) => set({ status: text, statusIsError: isError }),
   setIsSending: (active) => set({ isSending: active }),
   setActiveSidePanelTab: (tab) => set({ activeSidePanelTab: tab }),
@@ -688,12 +702,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 }))
 
 export function buildMessages(): Array<{ role: string; content: string }> {
-  const { systemInstructions, conversation } = useAppStore.getState()
-  const messages: Array<{ role: string; content: string }> = []
-  if (systemInstructions.trim()) {
-    messages.push({ role: 'system', content: systemInstructions.trim() })
-  }
-  return messages.concat(conversation)
+  return [...useAppStore.getState().conversation]
 }
 
 export function runHasActiveStep(runId: string): boolean {
