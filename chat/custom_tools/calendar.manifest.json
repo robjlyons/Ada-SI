@@ -1,0 +1,17 @@
+{
+  "kind": "interactive",
+  "display_name": "Calendar",
+  "icon": "calendar",
+  "ui": {
+    "template": "calendar",
+    "title_field": "title",
+    "date_field": "start",
+    "end_date_field": "end",
+    "fields": [
+      { "key": "title", "label": "Title", "type": "string" },
+      { "key": "start", "label": "Start", "type": "date" },
+      { "key": "end", "label": "End", "type": "date" }
+    ]
+  },
+  "operations": ["list_events", "create_event", "delete_event"]
+}

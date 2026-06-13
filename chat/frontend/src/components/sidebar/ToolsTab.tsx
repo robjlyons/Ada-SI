@@ -23,6 +23,7 @@ type ToolsTabProps = {
 export function ToolsTab({ tools }: ToolsTabProps) {
   const setStatus = useAppStore((s) => s.setStatus)
   const recentlyUnlockedTool = useAppStore((s) => s.recentlyUnlockedTool)
+  const openSkillApp = useAppStore((s) => s.openSkillApp)
   const { refreshTools, refreshPackages } = useToolBuildStream()
 
   const handleDelete = async (toolName: string) => {
@@ -43,33 +44,47 @@ export function ToolsTab({ tools }: ToolsTabProps) {
 
   return (
     <>
-      {tools.map((tool) => (
-        <div
-          key={tool.name}
-          className={`tool-card${recentlyUnlockedTool === tool.name ? ' tool-card-unlocked' : ''}`}
-          data-tool-name={tool.name}
-        >
-          <button
-            type="button"
-            className="tool-delete-btn"
-            title="Remove skill"
-            aria-label={`Remove skill ${tool.name}`}
-            onClick={() => void handleDelete(tool.name)}
+      {tools.map((tool) => {
+        const isInteractive = tool.kind === 'interactive'
+        const label = tool.display_name || tool.name
+        return (
+          <div
+            key={tool.name}
+            className={`tool-card${recentlyUnlockedTool === tool.name ? ' tool-card-unlocked' : ''}${isInteractive ? ' tool-card-interactive' : ''}`}
+            data-tool-name={tool.name}
           >
-            <IconTrash />
-          </button>
-          <div className="tool-card-header">
-            <span className="tool-card-icon">
-              <IconSkill />
-            </span>
-            <h3 className="tool-card-name">{tool.name}</h3>
-            {recentlyUnlockedTool === tool.name && (
-              <span className="tool-card-new-badge">New unlock</span>
+            <button
+              type="button"
+              className="tool-delete-btn"
+              title="Remove skill"
+              aria-label={`Remove skill ${tool.name}`}
+              onClick={() => void handleDelete(tool.name)}
+            >
+              <IconTrash />
+            </button>
+            <div className="tool-card-header">
+              <span className="tool-card-icon">
+                <IconSkill />
+              </span>
+              <h3 className="tool-card-name">{label}</h3>
+              {isInteractive && <span className="tool-card-app-badge">App</span>}
+              {recentlyUnlockedTool === tool.name && (
+                <span className="tool-card-new-badge">New unlock</span>
+              )}
+            </div>
+            <p className="tool-card-desc">{tool.description || 'No skill description yet.'}</p>
+            {isInteractive && (
+              <button
+                type="button"
+                className="btn-primary btn-sm tool-card-open-btn"
+                onClick={() => openSkillApp(tool.name)}
+              >
+                Open app
+              </button>
             )}
           </div>
-          <p className="tool-card-desc">{tool.description || 'No skill description yet.'}</p>
-        </div>
-      ))}
+        )
+      })}
     </>
   )
 }

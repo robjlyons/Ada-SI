@@ -73,12 +73,17 @@ from tools_engine import (
     delete_tool_async,
     execute_dynamic_tool,
     get_package_usage,
+    is_interactive_skill,
     prepare_agent_messages,
+    read_skill_data,
     read_tool_file,
+    read_tool_manifest,
     read_tool_requirements,
     read_tool_test,
     tool_exists,
     validate_tool_schema,
+    validate_manifest,
+    write_skill_data,
 )
 
 configure_logging()
@@ -594,6 +599,7 @@ async def run_agent_stream(
                     existing_code = read_tool_file(tool_name)
                     existing_reqs = read_tool_requirements(tool_name)
                     existing_test = read_tool_test(tool_name)
+                    existing_manifest = read_tool_manifest(tool_name)
 
                     yield process_step(
                         run_id,
@@ -630,6 +636,7 @@ async def run_agent_stream(
                             litellm_url=LITELLM_URL,
                             headers=litellm_headers(),
                             run_id=run_id,
+                            existing_manifest=existing_manifest,
                             reasoning_effort=reasoning_effort,
                         ),
                         kind="edit",
@@ -674,6 +681,7 @@ async def run_agent_stream(
                             "tool_code": existing_code,
                             "requirements": existing_reqs,
                             "test_code": existing_test,
+                            "manifest": existing_manifest,
                         },
                     }
                     yield {
@@ -685,6 +693,74 @@ async def run_agent_stream(
                         "kind": "edit",
                     }
                     return
+
+                if name == "open_skill_app":
+                    skill_name = args.get("skill_name", "").strip()
+                    log_tool_execution(
+                        run_id,
+                        name=name,
+                        arguments=args,
+                        result="(opening skill app)",
+                    )
+                    yield process_step(
+                        run_id,
+                        "tool_execute",
+                        f"Opening skill app: {skill_name or '?'}",
+                        "active",
+                        detail=skill_name,
+                    )
+                    if not skill_name:
+                        result = "open_skill_app missing skill_name."
+                        yield process_step(
+                            run_id,
+                            "tool_execute",
+                            "Opening skill app",
+                            "error",
+                            detail=result,
+                        )
+                    elif not tool_exists(skill_name):
+                        result = f"Skill '{skill_name}' is not installed."
+                        yield process_step(
+                            run_id,
+                            "tool_execute",
+                            f"Opening skill app: {skill_name}",
+                            "error",
+                            detail=result,
+                        )
+                    elif not is_interactive_skill(skill_name):
+                        result = (
+                            f"Skill '{skill_name}' is not interactive. "
+                            "Only interactive skills can be opened as apps."
+                        )
+                        yield process_step(
+                            run_id,
+                            "tool_execute",
+                            f"Opening skill app: {skill_name}",
+                            "error",
+                            detail=result,
+                        )
+                    else:
+                        yield {
+                            "_event": "open_skill_app",
+                            "run_id": run_id,
+                            "skill_name": skill_name,
+                        }
+                        result = f"Opened {skill_name} in the skill app viewer."
+                        yield process_step(
+                            run_id,
+                            "tool_execute",
+                            f"Opening skill app: {skill_name}",
+                            "done",
+                            detail=skill_name,
+                        )
+                    working_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call["id"],
+                            "content": result,
+                        }
+                    )
+                    continue
 
                 yield process_step(
                     run_id,
@@ -706,6 +782,12 @@ async def run_agent_stream(
                         "done",
                         detail=name,
                     )
+                    if is_interactive_skill(name):
+                        yield {
+                            "_event": "skill_data_changed",
+                            "run_id": run_id,
+                            "skill_name": name,
+                        }
                 except Exception as exc:
                     result = f"Tool execution failed: {exc}"
                     log_tool_execution(
@@ -844,6 +926,39 @@ async def remove_tool(tool_name: str) -> dict:
     return {"status": "deleted", "tool_name": tool_name}
 
 
+@app.get("/api/skills/{skill_name}/data")
+async def get_skill_data(skill_name: str) -> dict:
+    if not tool_exists(skill_name):
+        raise HTTPException(status_code=404, detail=f"Skill '{skill_name}' not found.")
+    if not is_interactive_skill(skill_name):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Skill '{skill_name}' is not an interactive skill.",
+        )
+    try:
+        return read_skill_data(skill_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/skills/{skill_name}/data")
+async def put_skill_data(skill_name: str, payload: dict = Body(...)) -> dict:
+    if not tool_exists(skill_name):
+        raise HTTPException(status_code=404, detail=f"Skill '{skill_name}' not found.")
+    if not is_interactive_skill(skill_name):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Skill '{skill_name}' is not an interactive skill.",
+        )
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+    try:
+        write_skill_data(skill_name, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return payload
+
+
 def _attach_package_usage(packages: list[dict]) -> list[dict]:
     usage = get_package_usage()
     enriched: list[dict] = []
@@ -968,6 +1083,26 @@ async def chat(request: Request) -> StreamingResponse:
                 if item.get("_event") == "done":
                     yield "data: [DONE]\n\n"
                     return
+
+                if item.get("_event") == "open_skill_app":
+                    yield sse_data(
+                        {
+                            "ada_event": "open_skill_app",
+                            "run_id": item["run_id"],
+                            "skill_name": item["skill_name"],
+                        }
+                    )
+                    continue
+
+                if item.get("_event") == "skill_data_changed":
+                    yield sse_data(
+                        {
+                            "ada_event": "skill_data_changed",
+                            "run_id": item["run_id"],
+                            "skill_name": item["skill_name"],
+                        }
+                    )
+                    continue
         except HTTPException as exc:
             log_error(run_id, "CHAT", f"HTTPException: {exc.detail}")
             yield process_step(
@@ -1118,11 +1253,12 @@ async def approve_tool(request: Request, payload: dict = Body(...)) -> Streaming
             tool_code = ""
             test_code = ""
             requirements: list[str] = []
+            manifest: dict | None = None
             parse_error: Exception | None = None
             for parse_attempt in range(PHASE_MAX_RETRIES):
                 try:
                     if parse_attempt == 0:
-                        tool_code, test_code, requirements = parse_generated_tool_response(
+                        tool_code, test_code, requirements, manifest = parse_generated_tool_response(
                             accumulated
                         )
                     break
@@ -1137,6 +1273,7 @@ async def approve_tool(request: Request, payload: dict = Body(...)) -> Streaming
                             tool_code,
                             test_code,
                             requirements,
+                            manifest,
                         ) = await repair_generated_tool_response(
                             plan_data["plan"],
                             tool_name,
@@ -1152,6 +1289,11 @@ async def approve_tool(request: Request, payload: dict = Body(...)) -> Streaming
                         break
                     raise parse_error from exc
 
+            if manifest:
+                manifest_ok, manifest_reason = validate_manifest(manifest, tool_name)
+                if not manifest_ok:
+                    raise ValueError(f"Invalid manifest: {manifest_reason}")
+
             log_generated_code(
                 run_id,
                 tool_name=tool_name,
@@ -1166,6 +1308,7 @@ async def approve_tool(request: Request, payload: dict = Body(...)) -> Streaming
                     "tool_code": tool_code,
                     "test_code": test_code,
                     "requirements": requirements,
+                    "manifest": manifest,
                 }
             )
             yield blog("Code generated successfully.")
@@ -1345,6 +1488,7 @@ async def approve_tool(request: Request, payload: dict = Body(...)) -> Streaming
             tool_code=tool_code,
             test_code=test_code,
             requirements=requirements,
+            manifest=manifest,
             creator_model=creator_model,
             step=step,
             phase=phase,
@@ -1364,6 +1508,7 @@ async def approve_tool(request: Request, payload: dict = Body(...)) -> Streaming
             tool_code=tool_code,
             test_code=test_code,
             requirements=requirements,
+            manifest=manifest,
             new_packages=new_packages,
             creator_model=creator_model,
             litellm_url=LITELLM_URL,
@@ -1448,6 +1593,7 @@ async def approve_pip(request: Request, payload: dict = Body(...)) -> StreamingR
             tool_code=pip_data["tool_code"],
             test_code=pip_data["test_code"],
             requirements=pip_data.get("requirements", []),
+            manifest=pip_data.get("manifest"),
             new_packages=pip_data.get("packages", []),
             creator_model=creator_model,
             litellm_url=LITELLM_URL,

@@ -25,6 +25,14 @@ export function useChatStream() {
       store.stopActiveProcessStep(json.run_id)
       return true
     }
+    if (json.ada_event === 'open_skill_app') {
+      store.openSkillApp(json.skill_name)
+      return true
+    }
+    if (json.ada_event === 'skill_data_changed') {
+      store.bumpSkillDataRevision()
+      return true
+    }
     return false
   }, [store])
 

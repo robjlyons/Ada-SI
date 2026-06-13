@@ -3,9 +3,33 @@ export type ChatMessage = {
   content: string
 }
 
+export type SkillUiField = {
+  key: string
+  label: string
+  type?: 'string' | 'text' | 'date' | 'boolean' | 'number'
+}
+
+export type SkillUiConfig = {
+  template: 'calendar' | 'list' | 'table'
+  title_field?: string
+  date_field?: string
+  end_date_field?: string
+  done_field?: string
+  fields?: SkillUiField[]
+}
+
 export type ToolSummary = {
   name: string
   description?: string
+  kind?: 'headless' | 'interactive'
+  display_name?: string
+  icon?: string
+  ui?: SkillUiConfig
+  operations?: string[]
+}
+
+export type SkillDataDocument = {
+  records: Array<Record<string, unknown>>
 }
 
 export type PipPackage = {
@@ -175,6 +199,8 @@ export type AdaEventType =
   | 'pip_install_pending'
   | 'tool_installed'
   | 'tool_build_failed'
+  | 'open_skill_app'
+  | 'skill_data_changed'
   | 'chat_error'
 
 export type ProcessStepEvent = {
@@ -250,6 +276,8 @@ export type AdaEvent =
       reason?: string
       logs?: string
     }
+  | { ada_event: 'open_skill_app'; run_id: string; skill_name: string }
+  | { ada_event: 'skill_data_changed'; run_id: string; skill_name: string }
   | { ada_event: 'chat_error'; run_id?: string; detail?: string }
 
 export type OpenAIStreamChunk = {

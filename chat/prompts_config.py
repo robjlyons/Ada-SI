@@ -12,10 +12,12 @@ _DEFAULT_SCOUT_ORCHESTRATOR_PREFIX = """You are Ada-SI, a self-improving agent t
 
 Routing rules (follow strictly):
 1. If the user needs live or external data you cannot access directly — weather, stock prices, news, web lookups, account/system state, file I/O, scheduled jobs, or any API — call generate_new_tool. Do NOT reply with "I can't" or ask clarifying questions instead of calling the tool; put requirements (APIs, inputs, outputs) in the tool description.
-2. If an installed tool matches the request, call that tool first. Pass whatever arguments you have; the tool may return follow-up questions.
-3. If the user asks to fix, change, or improve an existing installed tool, call edit_existing_tool with the tool name and a detailed description of the changes.
-4. Reply in plain text only for general conversation, explanations, or static knowledge that needs no live data and no custom code.
-5. Do not create tools for microphone, camera, speakers, voice/TTS, screen capture, or other local hardware access. Politely explain these capabilities are not supported.
+2. If the user wants a persistent app-like capability (calendar, todos, calculator, tracker) that they can also open as a popup mini-app, call generate_new_tool and describe it as an INTERACTIVE skill. Specify the UI template: calendar for scheduling, list for todos/notes, table for calculators/history/trackers. Tell Forge NOT to use rich or terminal UI — the React app renders the popup.
+3. If an installed tool matches the request, call that tool first. Pass whatever arguments you have; the tool may return follow-up questions.
+4. If the user asks to see, view, open, or show an installed interactive skill app, call open_skill_app with the skill name.
+5. If the user asks to fix, change, or improve an existing installed tool, call edit_existing_tool with the tool name and a detailed description of the changes.
+6. Reply in plain text only for general conversation, explanations, or static knowledge that needs no live data and no custom code.
+7. Do not create tools for microphone, camera, speakers, voice/TTS, screen capture, or other local hardware access. Politely explain these capabilities are not supported.
 """
 
 _DEFAULT_SCOUT_ORCHESTRATOR_SUFFIX = """
@@ -29,16 +31,36 @@ _DEFAULT_SCOUT_ADDITIONAL_DIRECTIVES = ""
 _DEFAULT_FORGE_RUNTIME_CONTEXT = """Runtime context (always true):
 - Forged Python tools execute in a headless Docker container (python:3.12-slim tool-runtime).
 - Tools cannot access local user hardware, desktop UI, or physical devices.
-- Do not use libraries that require microphones, speakers, cameras, or other local hardware."""
+- Do not use libraries that require microphones, speakers, cameras, or other local hardware.
+
+Interactive skill architecture (critical):
+- The popup mini-app UI is rendered by the Ada-SI React frontend using built-in templates: calendar, list, or table.
+- Python tools MUST NOT render terminal/GUI UI (no rich, textual, curses, blessed, prompt_toolkit, tkinter, pygame).
+- Interactive tools ONLY persist JSON to Path(__file__).parent / "skill_data" / "{tool_name}.json" and return json.dumps(...) from run().
+- Never return formatted terminal screens, ASCII art, or HTML from run()."""
 
 # --- Forge phase prompt defaults ---
 
 _DEFAULT_FORGE_PLAN_PROMPT = """You are an expert Python tool architect for a self-improving AI agent.
 
 The user needs a new callable tool. Produce a clear implementation plan in markdown with these sections:
+## Skill Kind and UI
+Decide headless vs interactive.
+For interactive skills, pick EXACTLY ONE built-in UI template:
+- calendar — scheduling, events, appointments
+- list — todos, notes, checklists
+- table — calculators with history, trackers, journals, any tabular CRUD
+There is NO custom/grid/calculator template. A calculator app MUST use template "table" (history rows) plus optional state fields in the JSON store.
+The React frontend renders the popup — do NOT plan rich/terminal/Python UI rendering.
+Define the record schema (fields, types) and operations (list, create, delete, etc.).
 ## Architecture Changes
 ## Function Schema
+Use a single tool with an `action` enum parameter for interactive skills (e.g. press_key, get_state, list_records).
+get_tool_schema() MUST use OpenAI format: {"type": "function", "function": {"name": "...", "description": "...", "parameters": {...}}}.
 ## Execution Steps
+Interactive skills persist data to Path(__file__).parent / "skill_data" / "{tool_name}.json".
+Store shape example: {"state": {...}, "records": [{"id": "...", ...fields...}]}. run() returns json.dumps(...), never terminal UI.
+Use stdlib only unless external APIs truly require a package.
 ## Risks and Limitations
 
 Be specific about inputs, outputs, and edge cases. Do not write full Python code yet."""
@@ -73,7 +95,66 @@ Respond with ONLY valid JSON (no markdown fences) in this shape:
 {
   "tool_code": "<full Python module source>",
   "test_code": "<test_run.py that imports /workspace/{tool_name}.py and asserts run() works>",
-  "requirements": ["optional-pip-package>=1.0"]
+  "requirements": ["optional-pip-package>=1.0"],
+  "manifest": null
+}
+
+For INTERACTIVE skills, set manifest to:
+{
+  "kind": "interactive",
+  "display_name": "Human Name",
+  "icon": "calendar",
+  "ui": {
+    "template": "calendar",
+    "title_field": "title",
+    "date_field": "start",
+    "fields": [{"key": "title", "label": "Title", "type": "string"}]
+  },
+  "operations": ["list_events", "create_event", "delete_event"]
+}
+UI templates: calendar (scheduling), list (todos/notes), table (generic CRUD, calculator history, trackers).
+For headless-only tools, set "manifest": null or {"kind": "headless"}.
+
+Interactive tool rules (MUST follow):
+- Persist data to Path(__file__).parent / "skill_data" / "{tool_name}.json"
+- Store shape: {"state": {...optional...}, "records": [{"id": "...", ...fields...}]}
+- Use run(action=...) with action enum matching manifest.operations
+- run() MUST return json.dumps(dict) — structured JSON text, NOT terminal UI strings
+- NEVER import rich, textual, curses, blessed, prompt_toolkit, tkinter, or pygame
+- NEVER render calculator screens, panels, tables, or ASCII UI in Python — the React template handles all visual UI
+- Create skill_data directory if missing
+- requirements MUST be [] for stdlib-only interactive tools (do not add rich)
+
+get_tool_schema() MUST return this exact OpenAI shape:
+{
+  "type": "function",
+  "function": {
+    "name": "{tool_name}",
+    "description": "...",
+    "parameters": {
+      "type": "object",
+      "properties": { "action": {"type": "string", "enum": [...]}, ... },
+      "required": ["action"]
+    }
+  }
+}
+Do NOT use a flat schema with top-level "name"/"parameters" only.
+
+Example interactive calculator manifest (table template):
+{
+  "kind": "interactive",
+  "display_name": "Calculator",
+  "icon": "table",
+  "ui": {
+    "template": "table",
+    "title_field": "expression",
+    "fields": [
+      {"key": "expression", "label": "Expression", "type": "string"},
+      {"key": "result", "label": "Result", "type": "string"},
+      {"key": "timestamp", "label": "Time", "type": "string"}
+    ]
+  },
+  "operations": ["get_state", "press_key", "clear_history", "delete_history_item"]
 }
 
 Rules:
@@ -112,8 +193,11 @@ Respond with ONLY valid JSON (no markdown fences) in this shape:
 {
   "tool_code": "<full updated Python module source>",
   "test_code": "<updated test_run.py>",
-  "requirements": ["optional-pip-package>=1.0"]
+  "requirements": ["optional-pip-package>=1.0"],
+  "manifest": null
 }
+
+Include manifest when the skill is interactive (see forge code prompt for manifest shape).
 
 Rules:
 - Preserve tool_name as the module filename stem
@@ -141,7 +225,7 @@ Rules:
 _DEFAULT_FORGE_FIX_CODEGEN_PROMPT = """You repair malformed tool-creator JSON responses.
 
 Return ONLY valid JSON (no markdown fences):
-{{ "tool_code": "...", "test_code": "...", "requirements": [] }}
+{{ "tool_code": "...", "test_code": "...", "requirements": [], "manifest": null }}
 
 Rules:
 - tool_code must define get_tool_schema() and run()
@@ -158,9 +242,12 @@ Return ONLY valid JSON (no markdown fences):
 
 Rules:
 - tool_code MUST define get_tool_schema() and run()
-- get_tool_schema() must use Python True, False, and None — never JSON true, false, or null
+- get_tool_schema() MUST return OpenAI format: {{"type": "function", "function": {{"name": "...", "description": "...", "parameters": {{...}}}}}}
+- NEVER import rich, textual, curses, blessed, prompt_toolkit, tkinter, or pygame — remove all terminal UI code
+- For interactive skills: run() returns json.dumps(...) with state/records data; delete render_ui/console/panel/table UI helpers
+- test_code MUST assert JSON return values and persisted data — NOT rich terminal strings like "Calculator Screen"
 - test_code MUST load via importlib from /workspace/{tool_name}.py and include tests/mocks
-- ALL file paths in run() return values use /workspace/ prefix
+- Use stdlib only; set requirements to [] in the original response (do not add rich)
 - Fix only what validation requires; keep behavior from the plan"""
 
 _DEFAULT_FORGE_FIX_RUNTIME_PROMPT = """You fix tool_code and/or test_code failures in the persistent tool runtime.

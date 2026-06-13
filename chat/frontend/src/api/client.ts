@@ -4,6 +4,7 @@ import type {
   PipPackage,
   PromptsConfig,
   PromptsResponse,
+  SkillDataDocument,
   ToolSummary,
 } from '../types/events'
 import { parseErrorMessage } from '../utils/text'
@@ -48,6 +49,21 @@ export async function fetchModels(): Promise<string[]> {
 export async function fetchTools(): Promise<ToolSummary[]> {
   const data = await requestJson<{ tools: ToolSummary[] }>('/api/tools')
   return data.tools || []
+}
+
+export async function fetchSkillData(skillName: string): Promise<SkillDataDocument> {
+  return requestJson<SkillDataDocument>(`/api/skills/${encodeURIComponent(skillName)}/data`)
+}
+
+export async function saveSkillData(
+  skillName: string,
+  data: SkillDataDocument,
+): Promise<SkillDataDocument> {
+  return requestJson<SkillDataDocument>(`/api/skills/${encodeURIComponent(skillName)}/data`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
 }
 
 export async function deleteTool(toolName: string): Promise<void> {

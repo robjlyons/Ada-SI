@@ -773,6 +773,250 @@
   animation: toolUnlockGlow 1.8s var(--ease) 2;
 }
 
+.tool-card-interactive {
+  border-color: rgba(120, 160, 255, 0.35);
+}
+
+.tool-card-app-badge {
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #a8c4ff;
+  background: rgba(120, 160, 255, 0.14);
+  border: 1px solid rgba(120, 160, 255, 0.28);
+  border-radius: 999px;
+  padding: 0.15rem 0.45rem;
+}
+
+.tool-card-open-btn {
+  margin-top: 0.65rem;
+  width: 100%;
+}
+
+.skill-app-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+}
+
+.skill-app-backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  background: rgba(4, 8, 18, 0.72);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+}
+
+.skill-app-window {
+  position: relative;
+  z-index: 1;
+  width: min(920px, 96vw);
+  max-height: min(86vh, 900px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 1rem;
+}
+
+.skill-app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.skill-app-header-title {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.skill-app-header-title h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.skill-app-header-icon {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.skill-app-body {
+  padding: 1rem;
+  overflow: auto;
+}
+
+.skill-app-status,
+.skill-app-empty {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.skill-app-error {
+  color: #ff8f8f;
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.skill-app-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.skill-app-form input {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+
+.skill-app-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  align-items: end;
+}
+
+.skill-app-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.skill-app-calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.skill-app-calendar-header h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.skill-app-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.skill-app-calendar-dow {
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  padding: 0.2rem;
+}
+
+.skill-app-calendar-cell {
+  position: relative;
+  min-height: 2.4rem;
+  border-radius: 0.45rem;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.skill-app-calendar-cell.empty {
+  border: none;
+  background: transparent;
+  cursor: default;
+}
+
+.skill-app-calendar-cell.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(120, 160, 255, 0.35);
+}
+
+.skill-app-calendar-dot {
+  position: absolute;
+  right: 0.25rem;
+  bottom: 0.2rem;
+  font-style: normal;
+  font-size: 0.65rem;
+  color: var(--accent);
+}
+
+.skill-app-list h5 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.skill-app-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.skill-app-meta {
+  margin: 0.15rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.skill-app-checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.skill-app-checklist li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.skill-app-checklist li.done span {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.skill-app-checklist label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.skill-app-table-wrap {
+  overflow: auto;
+}
+
+.skill-app-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.skill-app-table th,
+.skill-app-table td {
+  text-align: left;
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
 .tool-card-new-badge {
   margin-left: auto;
   font-size: 0.625rem;

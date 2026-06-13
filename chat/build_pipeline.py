@@ -49,6 +49,7 @@ async def stream_runtime_install(
     tool_code: str,
     test_code: str,
     requirements: list[str],
+    manifest: dict | None = None,
     new_packages: list[str],
     creator_model: str,
     litellm_url: str,
@@ -135,7 +136,9 @@ async def stream_runtime_install(
                 skip_pip=True,
             )
             log_runtime_call(run_id, action="install", tool_name=tool_name, logs=runtime_logs)
-            write_tool_files(tool_name, current_tool, requirements, current_test)
+            write_tool_files(
+                tool_name, current_tool, requirements, current_test, manifest=manifest
+            )
             tool_code = current_tool
             test_code = current_test
             runtime_error = None
@@ -231,6 +234,7 @@ async def maybe_pause_for_pip_approval(
     tool_code: str,
     test_code: str,
     requirements: list[str],
+    manifest: dict | None = None,
     creator_model: str,
     step: Callable[..., str],
     phase: Callable[..., str],
@@ -253,6 +257,7 @@ async def maybe_pause_for_pip_approval(
         "tool_code": tool_code,
         "test_code": test_code,
         "requirements": requirements,
+        "manifest": manifest,
         "creator_model": creator_model,
         "reasoning_effort": reasoning_effort,
         "created_at": time.time(),

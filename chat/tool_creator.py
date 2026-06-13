@@ -114,6 +114,7 @@ async def draft_tool_edit_plan_stream(
     litellm_url: str,
     headers: dict[str, str],
     run_id: str = "",
+    existing_manifest: dict | None = None,
     reasoning_effort: str | None = None,
 ) -> AsyncIterator[tuple[str, str]]:
     user_content = (
@@ -122,6 +123,8 @@ async def draft_tool_edit_plan_stream(
         f"Current tool_code:\n```python\n{existing_tool_code}\n```\n\n"
         f"Current requirements: {existing_requirements}"
     )
+    if existing_manifest:
+        user_content += f"\n\nCurrent manifest:\n```json\n{json.dumps(existing_manifest, indent=2)}\n```"
     messages = [
         {"role": "system", "content": get_forge_edit_plan_prompt()},
         {"role": "user", "content": user_content},
@@ -248,11 +251,12 @@ def _extract_json_object(text: str) -> dict:
         return json.loads(text[start : end + 1])
 
 
-def parse_generated_tool_response(raw: str) -> tuple[str, str, list[str]]:
+def parse_generated_tool_response(raw: str) -> tuple[str, str, list[str], dict | None]:
     text = _strip_markdown_fences(raw)
     tool_code = ""
     test_code = ""
     requirements: list[str] = []
+    manifest: dict | None = None
 
     try:
         parsed = _extract_json_object(text)
@@ -261,6 +265,9 @@ def parse_generated_tool_response(raw: str) -> tuple[str, str, list[str]]:
         raw_reqs = parsed.get("requirements") or []
         if isinstance(raw_reqs, list):
             requirements = [str(r).strip() for r in raw_reqs if str(r).strip()]
+        raw_manifest = parsed.get("manifest")
+        if isinstance(raw_manifest, dict):
+            manifest = raw_manifest
     except (ValueError, json.JSONDecodeError):
         tool_code = (_extract_json_string_value(text, "tool_code") or "").strip()
         test_code = (_extract_json_string_value(text, "test_code") or "").strip()
@@ -270,7 +277,7 @@ def parse_generated_tool_response(raw: str) -> tuple[str, str, list[str]]:
             "Tool creator response missing tool_code or test_code. "
             "The model may have returned malformed JSON."
         )
-    return tool_code, test_code, requirements
+    return tool_code, test_code, requirements, manifest
 
 
 def validate_test_code(test_code: str) -> tuple[bool, str]:
@@ -312,14 +319,14 @@ async def repair_generated_tool_response(
     run_id: str = "",
     edit_context: dict | None = None,
     reasoning_effort: str | None = None,
-) -> tuple[str, str, list[str]]:
+) -> tuple[str, str, list[str], dict | None]:
     log_debug(run_id, "CODE_FIX", f"repairing codegen JSON model={creator_model}")
     user_content = (
         f"Tool name: `{tool_name}`\n\n"
         f"Plan:\n{plan}\n\n"
         f"Parse error: {error_message}\n\n"
         f"Malformed model output:\n```\n{raw_response[:12000]}\n```\n\n"
-        f"Return corrected tool_code, test_code, and requirements."
+        f"Return corrected tool_code, test_code, requirements, and manifest when applicable."
     )
     if edit_context:
         user_content += (
@@ -337,7 +344,7 @@ async def repair_generated_tool_response(
         litellm_url, headers, creator_model, messages, temperature=0.1,
         reasoning_effort=reasoning_effort,
     )
-    tool_code, test_code, requirements = parse_generated_tool_response(raw)
+    tool_code, test_code, requirements, _manifest = parse_generated_tool_response(raw)
     log_generated_code(
         run_id,
         tool_name=tool_name,
@@ -345,7 +352,7 @@ async def repair_generated_tool_response(
         test_code=test_code,
         source="repair_codegen",
     )
-    return tool_code, test_code, requirements
+    return tool_code, test_code, requirements, _manifest
 
 
 async def fix_validation_errors(
@@ -512,15 +519,22 @@ async def generate_tool_code_stream(
             f"Current tool_code:\n```python\n{edit_context.get('tool_code', '')}\n```\n\n"
             f"Current test_code:\n```python\n{edit_context.get('test_code', '')}\n```\n\n"
             f"Current requirements: {edit_context.get('requirements', [])}\n\n"
-            f"Produce updated tool_code, test_code, and requirements."
         )
+        if edit_context.get("manifest"):
+            user_content += (
+                f"Current manifest:\n```json\n"
+                f"{json.dumps(edit_context['manifest'], indent=2)}\n```\n\n"
+            )
+        user_content += "Produce updated tool_code, test_code, requirements, and manifest."
         system_prompt = get_forge_edit_code_prompt().replace("{tool_name}", tool_name)
     else:
         user_content = (
             f"Tool name: `{tool_name}`\n\n"
             f"Approved plan:\n{plan}\n\n"
-            f"Generate tool_code, test_code, and requirements. The tool file will be saved as {tool_name}.py "
-            f"and mounted in the sandbox at /workspace/{tool_name}.py."
+            f"Generate tool_code, test_code, requirements, and manifest. "
+            f"The tool file will be saved as {tool_name}.py "
+            f"and mounted in the sandbox at /workspace/{tool_name}.py. "
+            f"Use manifest null for headless tools; include interactive manifest when the plan specifies an app UI."
         )
         system_prompt = get_forge_code_prompt().replace("{tool_name}", tool_name)
 

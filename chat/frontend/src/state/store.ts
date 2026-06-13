@@ -91,6 +91,8 @@ type AppState = {
   showScrollBottom: boolean
   celebration: CelebrationEvent | null
   recentlyUnlockedTool: string | null
+  activeSkillApp: string | null
+  skillDataRevision: number
   playerProgress: PlayerProgress
   lastXpGainAt: number | null
   abortController: AbortController | null
@@ -112,6 +114,9 @@ type AppState = {
   setShowScrollBottom: (show: boolean) => void
   clearCelebration: () => void
   clearRecentlyUnlockedTool: () => void
+  openSkillApp: (skillName: string) => void
+  closeSkillApp: () => void
+  bumpSkillDataRevision: () => void
   grantXp: (source: XpSource) => GrantXpResult
   setAbortController: (controller: AbortController | null) => void
   bindRunAbortController: (runId: string) => AbortController
@@ -228,6 +233,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   showScrollBottom: false,
   celebration: null,
   recentlyUnlockedTool: null,
+  activeSkillApp: null,
+  skillDataRevision: 0,
   playerProgress: loadPlayerProgress(),
   lastXpGainAt: null,
   abortController: null,
@@ -273,6 +280,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   setShowScrollBottom: (show) => set({ showScrollBottom: show }),
   clearCelebration: () => set({ celebration: null }),
   clearRecentlyUnlockedTool: () => set({ recentlyUnlockedTool: null }),
+  openSkillApp: (skillName) => set({ activeSkillApp: skillName }),
+  closeSkillApp: () => set({ activeSkillApp: null }),
+  bumpSkillDataRevision: () =>
+    set((state) => ({ skillDataRevision: state.skillDataRevision + 1 })),
 
   grantXp: (source) => {
     const amount = xpGrantAmount(source)
