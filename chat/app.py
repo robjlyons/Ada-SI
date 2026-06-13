@@ -67,6 +67,7 @@ from tool_creator import (
     draft_tool_plan_stream,
     fix_validation_errors,
     generate_tool_code_stream,
+    normalize_preview_screenshot,
     parse_generated_tool_response,
     repair_generated_tool_response,
     revise_preview_code,
@@ -1769,6 +1770,30 @@ async def revise_preview(request: Request, payload: dict = Body(...)) -> Streami
         yield phase("ui_preview", "active")
         yield blog("Revising skill from your app preview feedback…")
 
+        screenshot_raw = payload.get("screenshot_base64")
+        try:
+            screenshot_b64 = normalize_preview_screenshot(
+                str(screenshot_raw).strip() if screenshot_raw else None
+            )
+        except ValueError as exc:
+            yield step("ui_preview", "Revising app from your feedback", "error", detail=str(exc))
+            yield phase("ui_preview", "error", detail=str(exc)[:200])
+            yield sse_data(
+                {
+                    "ada_event": "tool_build_failed",
+                    "run_id": run_id,
+                    "tool_name": tool_name,
+                    "reason": str(exc),
+                }
+            )
+            yield "data: [DONE]\n\n"
+            return
+
+        if screenshot_b64:
+            yield blog("App screenshot attached for vision review.")
+        else:
+            yield blog("No screenshot attached — revising from text feedback only.", level="warn")
+
         try:
             tool_code, test_code, manifest = await revise_preview_code(
                 tool_name,
@@ -1781,6 +1806,7 @@ async def revise_preview(request: Request, payload: dict = Body(...)) -> Streami
                 headers=litellm_headers(),
                 run_id=run_id,
                 reasoning_effort=reasoning_effort,
+                screenshot_base64=screenshot_b64,
             )
         except Exception as exc:
             yield step("ui_preview", "Revising app from your feedback", "error", detail=str(exc))

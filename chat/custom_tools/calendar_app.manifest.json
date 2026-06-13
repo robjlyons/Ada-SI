@@ -1,0 +1,48 @@
+{
+  "kind": "interactive",
+  "display_name": "Calendar",
+  "icon": "calendar",
+  "ui": {
+    "template": "calendar",
+    "title_field": "title",
+    "date_field": "start",
+    "fields": [
+      {
+        "key": "title",
+        "label": "Title",
+        "type": "string"
+      },
+      {
+        "key": "start",
+        "label": "Start Time",
+        "type": "string"
+      },
+      {
+        "key": "end",
+        "label": "End Time",
+        "type": "string"
+      },
+      {
+        "key": "description",
+        "label": "Description",
+        "type": "string"
+      },
+      {
+        "key": "location",
+        "label": "Location",
+        "type": "string"
+      },
+      {
+        "key": "all_day",
+        "label": "All Day",
+        "type": "boolean"
+      }
+    ]
+  },
+  "operations": [
+    "list_events",
+    "create_event",
+    "update_event",
+    "delete_event"
+  ]
+}

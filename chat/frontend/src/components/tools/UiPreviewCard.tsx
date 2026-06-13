@@ -28,7 +28,8 @@ export function UiPreviewCard({ feedId, card, preview }: UiPreviewCardProps) {
       <div className="ui-preview-body">
         <p>
           The interactive app is open in a popup. Try creating, editing, and deleting items,
-          then approve or request changes.
+          then approve or request changes. Requesting changes captures a screenshot of the app
+          and sends it to the forge model with your feedback.
         </p>
         <button
           type="button"
@@ -68,7 +69,13 @@ export function UiPreviewCard({ feedId, card, preview }: UiPreviewCardProps) {
           className="btn-secondary"
           disabled={preview.busy || !feedback.trim()}
           onClick={() =>
-            void runPreviewRevision(feedId, preview.previewId, card.runId, feedback)
+            void runPreviewRevision(
+              feedId,
+              preview.previewId,
+              card.runId,
+              feedback,
+              card.toolName,
+            )
           }
         >
           Request changes

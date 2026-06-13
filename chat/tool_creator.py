@@ -1,4 +1,6 @@
 import ast
+import base64
+import binascii
 import json
 import re
 from collections.abc import AsyncIterator
@@ -20,6 +22,68 @@ from prompts_config import (
     get_forge_revise_preview_prompt,
 )
 from tools_engine import validate_manifest, validate_tool_module
+
+MAX_PREVIEW_SCREENSHOT_BYTES = 2 * 1024 * 1024
+
+
+def normalize_preview_screenshot(raw: str | None) -> str | None:
+    """Return raw base64 PNG/JPEG bytes (no data: prefix) or None."""
+    if not raw or not isinstance(raw, str):
+        return None
+    value = raw.strip()
+    if not value:
+        return None
+    if value.startswith("data:"):
+        comma = value.find(",")
+        if comma == -1:
+            return None
+        value = value[comma + 1 :]
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (ValueError, binascii.Error):
+        return None
+    if len(decoded) > MAX_PREVIEW_SCREENSHOT_BYTES:
+        raise ValueError(
+            f"Screenshot too large ({len(decoded)} bytes; max {MAX_PREVIEW_SCREENSHOT_BYTES})."
+        )
+    if len(decoded) < 64:
+        return None
+    return base64.b64encode(decoded).decode("ascii")
+
+
+def build_revise_preview_user_content(
+    *,
+    tool_name: str,
+    feedback: str,
+    manifest_json: str,
+    tool_code: str,
+    test_code: str,
+    screenshot_b64: str | None,
+) -> str | list[dict]:
+    text = (
+        f"Tool name: `{tool_name}`\n\n"
+        f"User UI feedback:\n{feedback}\n\n"
+    )
+    if screenshot_b64:
+        text += (
+            "A screenshot of the current interactive app UI is attached. "
+            "Use it together with the feedback to fix manifest.ui and tool behavior.\n\n"
+        )
+    text += (
+        f"Current manifest:\n```json\n{manifest_json}\n```\n\n"
+        f"Current tool_code:\n```python\n{tool_code}\n```\n\n"
+        f"Current test_code:\n```python\n{test_code}\n```\n\n"
+        f"Return revised tool_code, test_code, and manifest."
+    )
+    if not screenshot_b64:
+        return text
+    return [
+        {"type": "text", "text": text},
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:image/png;base64,{screenshot_b64}"},
+        },
+    ]
 
 
 async def _litellm_chat(
@@ -417,16 +481,20 @@ async def revise_preview_code(
     headers: dict[str, str],
     run_id: str = "",
     reasoning_effort: str | None = None,
+    screenshot_base64: str | None = None,
 ) -> tuple[str, str, dict | None]:
     log_debug(run_id, "CODE_FIX", f"revising preview from UI feedback model={creator_model}")
+    screenshot_b64 = normalize_preview_screenshot(screenshot_base64)
+    if screenshot_b64:
+        log_debug(run_id, "CODE_FIX", "preview revision includes UI screenshot")
     manifest_json = json.dumps(manifest, indent=2) if manifest else "null"
-    user_content = (
-        f"Tool name: `{tool_name}`\n\n"
-        f"User UI feedback:\n{feedback}\n\n"
-        f"Current manifest:\n```json\n{manifest_json}\n```\n\n"
-        f"Current tool_code:\n```python\n{tool_code}\n```\n\n"
-        f"Current test_code:\n```python\n{test_code}\n```\n\n"
-        f"Return revised tool_code, test_code, and manifest."
+    user_content = build_revise_preview_user_content(
+        tool_name=tool_name,
+        feedback=feedback,
+        manifest_json=manifest_json,
+        tool_code=tool_code,
+        test_code=test_code,
+        screenshot_b64=screenshot_b64,
     )
     messages = [
         {

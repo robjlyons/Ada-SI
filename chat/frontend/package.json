@@ -16,6 +16,7 @@
     "framer-motion": "^12.40.0",
     "highlight.js": "^11.11.1",
     "howler": "^2.2.4",
+    "html-to-image": "^1.11.13",
     "postprocessing": "^6.39.1",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",

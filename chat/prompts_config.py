@@ -187,6 +187,9 @@ _DEFAULT_FORGE_REVISE_PREVIEW_PROMPT = """You revise an interactive skill previe
 The user tested the popup mini-app (calendar, list, or table template) and requested changes.
 Fix tool_code, test_code, and manifest so the UI and run(action=...) behavior match.
 
+When a screenshot of the current app UI is attached, use it to spot layout issues, wrong or missing fields,
+labels, empty states, and mismatches between manifest.ui and what is rendered.
+
 Respond with ONLY valid JSON (no markdown fences):
 {{ "tool_code": "...", "test_code": "...", "manifest": {{ ... }} }}
 

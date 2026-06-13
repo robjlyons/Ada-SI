@@ -4,6 +4,7 @@ import { consumeBuildStream, consumeSseStream } from '../api/sse'
 import { VIEWER_PHASES } from '../constants'
 import { useAppStore } from '../state/store'
 import { isAdaEvent, type AdaEvent } from '../types/events'
+import { captureSkillAppForTool } from '../utils/captureSkillAppScreenshot'
 
 export function useToolBuildStream() {
   const store = useAppStore()
@@ -375,15 +376,33 @@ export function useToolBuildStream() {
   )
 
   const runPreviewRevision = useCallback(
-    async (cardId: string, previewId: string, runId: string, feedback: string) => {
+    async (
+      cardId: string,
+      previewId: string,
+      runId: string,
+      feedback: string,
+      toolName: string,
+    ) => {
       if (!feedback.trim()) {
         store.setStatus('Describe the changes you want before requesting a revision.', true)
         return
+      }
+      store.appendViewerLog(cardId, 'Capturing app screenshot for vision review…')
+      const screenshotBase64 = await captureSkillAppForTool(toolName)
+      if (screenshotBase64) {
+        store.appendViewerLog(cardId, 'Screenshot captured — sending to forge model.', 'info')
+      } else {
+        store.appendViewerLog(
+          cardId,
+          'Could not capture screenshot — revising from text only.',
+          'warn',
+        )
       }
       store.appendViewerLog(cardId, 'Revising app from your feedback…')
       await runPreviewContinuation(cardId, previewId, runId, '/api/revise_preview', {
         feedback,
         tool_creator_model: store.toolCreatorModel,
+        screenshot_base64: screenshotBase64,
       })
     },
     [store, runPreviewContinuation],
