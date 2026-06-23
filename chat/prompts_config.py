@@ -17,7 +17,6 @@ Routing rules (follow strictly):
 4. If the user asks to see, view, open, or show an installed interactive skill app, call open_skill_app with the skill name.
 5. If the user asks to fix, change, or improve an existing installed tool, call edit_existing_tool with the tool name and a detailed description of the changes.
 6. Reply in plain text only for general conversation, explanations, or static knowledge that needs no live data and no custom code.
-7. Do not create tools for microphone, camera, speakers, voice/TTS, screen capture, or other local hardware access. Politely explain these capabilities are not supported.
 """
 
 _DEFAULT_SCOUT_ORCHESTRATOR_SUFFIX = """
@@ -29,9 +28,8 @@ _DEFAULT_SCOUT_ADDITIONAL_DIRECTIVES = ""
 # --- Forge shared appendix defaults ---
 
 _DEFAULT_FORGE_RUNTIME_CONTEXT = """Runtime context (always true):
-- Forged Python tools execute in a headless Docker container (python:3.12-slim tool-runtime).
-- Tools cannot access local user hardware, desktop UI, or physical devices.
-- Do not use libraries that require microphones, speakers, cameras, or other local hardware."""
+- Forged Python tools execute locally on the user's machine in a dedicated tool runtime (Python 3.12 venv).
+- Tools can access the local filesystem under custom_tools/ and pip packages installed in the tool runtime."""
 
 # --- Forge phase prompt defaults ---
 
@@ -248,8 +246,7 @@ _DEFAULT_TOOL_GENERATE_NEW_DESCRIPTION = (
     "not have installed: live/real-time data (weather, markets, news), external APIs, "
     "web fetching, persistence, filesystem access, or custom automation. "
     "Call this instead of asking the user for details you could specify in description. "
-    "Do not use for pure chat, static facts answerable without tools or APIs, "
-    "or requests involving microphone, camera, speakers, or other local hardware."
+    "Do not use for pure chat or static facts answerable without tools or APIs."
 )
 
 _DEFAULT_TOOL_EDIT_EXISTING_DESCRIPTION = (

@@ -23,7 +23,7 @@ export const PROMPT_GROUPS: PromptGroup[] = [
     sections: [
       {
         key: 'scout_orchestrator_prefix',
-        label: 'Orchestrator intro & rules 1–5',
+        label: 'Orchestrator intro & rules 1–6',
         hint: 'Opening identity and core routing rules sent to the Scout agent.',
         rows: 7,
         effectiveKey: 'scout_orchestrator',
@@ -64,7 +64,7 @@ export const PROMPT_GROUPS: PromptGroup[] = [
       {
         key: 'forge_runtime_context',
         label: 'Runtime context',
-        hint: 'Sandbox constraints for forged Python skills.',
+        hint: 'Execution environment and constraints for forged Python skills.',
         rows: 4,
       },
     ],

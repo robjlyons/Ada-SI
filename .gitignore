@@ -1,4 +1,9 @@
 .env
+.venv/
+.venv-litellm/
+.ada-si.pids
+logs/
+chat/.tool_runtime_venv/
 __pycache__/
 *.pyc
 .Python

@@ -1,6 +1,3 @@
 {
-  "approved_packages": [
-    "pyttsx3>=2.90",
-    "requests"
-  ]
+  "approved_packages": []
 }
