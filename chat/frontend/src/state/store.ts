@@ -52,6 +52,12 @@ export type PlayerProgress = {
   skillsUnlocked: number
 }
 
+export const DEFAULT_PLAYER_PROGRESS: PlayerProgress = {
+  totalXp: 0,
+  chatsCompleted: 0,
+  skillsUnlocked: 0,
+}
+
 export type GrantXpResult = {
   leveledUp: boolean
   xpGained: number
@@ -59,14 +65,22 @@ export type GrantXpResult = {
   granted: boolean
 }
 
-export type CelebrationEvent = {
-  id: string
-  toolName: string
-  progression: ProgressionSnapshot
-  leveledUp: boolean
-  xpGained: number
-  source: XpSource | 'level'
-}
+export type CelebrationEvent =
+  | {
+      id: string
+      kind: 'level'
+      progression: ProgressionSnapshot
+      xpGained: number
+      previousLevel: number
+      source: XpSource
+    }
+  | {
+      id: string
+      kind: 'skill'
+      toolName: string
+      progression: ProgressionSnapshot
+      xpGained: number
+    }
 
 type AppState = {
   appConfig: AppConfig
@@ -89,7 +103,7 @@ type AppState = {
   tools: ToolSummary[]
   packages: PipPackage[]
   showScrollBottom: boolean
-  celebration: CelebrationEvent | null
+  celebrations: CelebrationEvent[]
   recentlyUnlockedTool: string | null
   activeSkillApp: string | null
   skillDataRevision: number
@@ -118,6 +132,7 @@ type AppState = {
   closeSkillApp: () => void
   bumpSkillDataRevision: () => void
   grantXp: (source: XpSource) => GrantXpResult
+  resetPlayerProgress: () => void
   setAbortController: (controller: AbortController | null) => void
   bindRunAbortController: (runId: string) => AbortController
   clearRunAbortController: (runId: string) => void
@@ -190,7 +205,7 @@ function loadPlayerProgress(): PlayerProgress {
   } catch {
     // ignore corrupt storage
   }
-  return { totalXp: 0, chatsCompleted: 0, skillsUnlocked: 0 }
+  return { ...DEFAULT_PLAYER_PROGRESS }
 }
 
 function savePlayerProgress(progress: PlayerProgress) {
@@ -204,6 +219,36 @@ function migrateLegacyProgress(tools: ToolSummary[], progress: PlayerProgress): 
     totalXp: Math.min(tools.length * 100, getMaxTotalXp()),
     chatsCompleted: progress.chatsCompleted,
     skillsUnlocked: tools.length,
+  }
+}
+
+function createLevelUpCelebration(
+  beforeXp: number,
+  afterXp: number,
+  xpGained: number,
+  source: XpSource,
+): CelebrationEvent {
+  return {
+    id: createFeedId(),
+    kind: 'level',
+    progression: getProgression(afterXp, xpGained),
+    xpGained,
+    previousLevel: getProgression(beforeXp).level,
+    source,
+  }
+}
+
+function createSkillCelebration(
+  toolName: string,
+  progression: ProgressionSnapshot,
+  xpGained: number,
+): CelebrationEvent {
+  return {
+    id: createFeedId(),
+    kind: 'skill',
+    toolName,
+    progression,
+    xpGained,
   }
 }
 
@@ -232,7 +277,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   tools: [],
   packages: [],
   showScrollBottom: false,
-  celebration: null,
+  celebrations: [],
   recentlyUnlockedTool: null,
   activeSkillApp: null,
   skillDataRevision: 0,
@@ -279,7 +324,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   setPackages: (packages) => set({ packages }),
   setShowScrollBottom: (show) => set({ showScrollBottom: show }),
-  clearCelebration: () => set({ celebration: null }),
+  clearCelebration: () =>
+    set((state) => ({
+      celebrations: state.celebrations.slice(1),
+    })),
   clearRecentlyUnlockedTool: () => set({ recentlyUnlockedTool: null }),
   openSkillApp: (skillName) => set({ activeSkillApp: skillName }),
   closeSkillApp: () => set({ activeSkillApp: null }),
@@ -323,12 +371,29 @@ export const useAppStore = create<AppState>((set, get) => ({
     const progression = getProgression(cappedAfter, xpGained)
     const leveledUp = didLevelUp(beforeXp, cappedAfter)
 
-    set({
+    set((state) => ({
       playerProgress: progress,
       lastXpGainAt: Date.now(),
-    })
+      celebrations: leveledUp
+        ? [
+            ...state.celebrations,
+            createLevelUpCelebration(beforeXp, cappedAfter, xpGained, source),
+          ]
+        : state.celebrations,
+    }))
 
     return { leveledUp, xpGained, progression, granted: true }
+  },
+
+  resetPlayerProgress: () => {
+    savePlayerProgress(DEFAULT_PLAYER_PROGRESS)
+    set({
+      playerProgress: { ...DEFAULT_PLAYER_PROGRESS },
+      lastXpGainAt: null,
+      celebrations: [],
+      recentlyUnlockedTool: null,
+      activeSkillApp: null,
+    })
   },
 
   setAbortController: (controller) => set({ abortController: controller }),
@@ -694,18 +759,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       busy: false,
     })
 
-    set({
-      celebration: {
-        id: createFeedId(),
-        toolName,
-        progression: xpResult.progression,
-        leveledUp: xpResult.leveledUp,
-        xpGained: xpResult.xpGained,
-        source: 'skill',
-      },
+    set((state) => ({
+      celebrations: [
+        ...state.celebrations,
+        createSkillCelebration(toolName, xpResult.progression, xpResult.xpGained),
+      ],
       recentlyUnlockedTool: toolName,
       activeSidePanelTab: 'tools',
-    })
+    }))
 
     window.setTimeout(() => {
       const current = get().feed.find((f) => f.id === id && f.type === 'tool-plan') as

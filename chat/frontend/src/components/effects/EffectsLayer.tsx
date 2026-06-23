@@ -2,12 +2,14 @@ import { useEffect, useRef } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import { useAppStore } from '../../state/store'
 import { spawnConfetti } from './confetti'
-import { playUnlockSound } from './unlockSound'
+import { LevelUpModal } from './LevelUpModal'
 import { SkillUnlockModal } from './SkillUnlockModal'
+import { playUnlockSound } from './unlockSound'
 
 export function EffectsLayer() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const celebration = useAppStore((s) => s.celebration)
+  const celebrations = useAppStore((s) => s.celebrations)
+  const activeCelebration = celebrations[0] ?? null
   const clearCelebration = useAppStore((s) => s.clearCelebration)
   const clearRecentlyUnlockedTool = useAppStore((s) => s.clearRecentlyUnlockedTool)
   const lastCelebrationId = useRef<string | null>(null)
@@ -26,45 +28,57 @@ export function EffectsLayer() {
   }, [])
 
   useEffect(() => {
-    if (!celebration) return
+    if (!activeCelebration) return
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') clearCelebration()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [celebration, clearCelebration])
+  }, [activeCelebration, clearCelebration])
 
   useEffect(() => {
-    if (!celebration || celebration.id === lastCelebrationId.current) return
-    lastCelebrationId.current = celebration.id
+    if (!activeCelebration || activeCelebration.id === lastCelebrationId.current) return
+    lastCelebrationId.current = activeCelebration.id
 
     const canvas = canvasRef.current
     let stopConfetti: (() => void) | undefined
     if (canvas) {
       stopConfetti = spawnConfetti(canvas, canvas.width * 0.5, canvas.height * 0.42)
     }
-    playUnlockSound(celebration.leveledUp)
+    playUnlockSound(activeCelebration.kind === 'level')
 
-    const highlightTimer = window.setTimeout(() => clearRecentlyUnlockedTool(), 6000)
+    let highlightTimer: number | undefined
+    if (activeCelebration.kind === 'skill') {
+      highlightTimer = window.setTimeout(() => clearRecentlyUnlockedTool(), 6000)
+    }
 
     return () => {
       stopConfetti?.()
-      window.clearTimeout(highlightTimer)
+      if (highlightTimer !== undefined) {
+        window.clearTimeout(highlightTimer)
+      }
     }
-  }, [celebration, clearRecentlyUnlockedTool])
+  }, [activeCelebration, clearRecentlyUnlockedTool])
 
   return (
     <>
       <canvas ref={canvasRef} className="effects-canvas" aria-hidden="true" />
       <AnimatePresence>
-        {celebration && (
-          <SkillUnlockModal
-            key={celebration.id}
-            event={celebration}
+        {activeCelebration?.kind === 'level' ? (
+          <LevelUpModal
+            key={activeCelebration.id}
+            event={activeCelebration}
             onDismiss={clearCelebration}
           />
-        )}
+        ) : null}
+        {activeCelebration?.kind === 'skill' ? (
+          <SkillUnlockModal
+            key={activeCelebration.id}
+            event={activeCelebration}
+            onDismiss={clearCelebration}
+          />
+        ) : null}
       </AnimatePresence>
     </>
   )

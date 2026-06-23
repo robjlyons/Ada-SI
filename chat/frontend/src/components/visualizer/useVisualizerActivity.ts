@@ -20,15 +20,16 @@ export type VisualizerActivity = {
 export function useVisualizerActivity(): VisualizerActivity {
   const isSending = useAppStore((s) => s.isSending)
   const feed = useAppStore((s) => s.feed)
-  const celebration = useAppStore((s) => s.celebration)
+  const celebrations = useAppStore((s) => s.celebrations)
+  const activeCelebration = celebrations[0]
 
   return useMemo(() => {
-    if (celebration) {
+    if (activeCelebration) {
       return {
         mode: 'celebrating' as const,
         intensity: MODE_INTENSITY.celebrating,
         activePhaseIndex: VIEWER_PHASES.length - 1,
-        statusLabel: 'Skill unlocked',
+        statusLabel: activeCelebration.kind === 'level' ? 'Level up' : 'Skill unlocked',
       }
     }
 
@@ -97,5 +98,5 @@ export function useVisualizerActivity(): VisualizerActivity {
       activePhaseIndex: 0,
       statusLabel: 'Standby',
     }
-  }, [isSending, feed, celebration])
+  }, [isSending, feed, activeCelebration])
 }

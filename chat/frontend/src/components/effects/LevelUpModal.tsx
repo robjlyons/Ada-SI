@@ -2,21 +2,27 @@ import { motion } from 'framer-motion'
 import { getXpProgressPercent } from '../../state/progression'
 import type { CelebrationEvent } from '../../state/store'
 
-type SkillUnlockModalProps = {
-  event: Extract<CelebrationEvent, { kind: 'skill' }>
+type LevelUpModalProps = {
+  event: Extract<CelebrationEvent, { kind: 'level' }>
   onDismiss: () => void
 }
 
-export function SkillUnlockModal({ event, onDismiss }: SkillUnlockModalProps) {
-  const { toolName, progression, xpGained } = event
+const XP_SOURCE_LABELS = {
+  chat: 'Quest complete',
+  skill: 'Skill unlocked',
+} as const
+
+export function LevelUpModal({ event, onDismiss }: LevelUpModalProps) {
+  const { progression, xpGained, previousLevel, source } = event
   const progressPct = getXpProgressPercent(progression)
+  const levelLabel = progression.isMaxLevel ? 'Lv. 50 MAX' : `Lv. ${progression.level}`
 
   return (
     <motion.div
-      className="skill-unlock-overlay"
+      className="level-up-overlay"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="skill-unlock-title"
+      aria-labelledby="level-up-title"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -24,8 +30,8 @@ export function SkillUnlockModal({ event, onDismiss }: SkillUnlockModalProps) {
     >
       <motion.button
         type="button"
-        className="skill-unlock-backdrop"
-        aria-label="Dismiss skill unlock"
+        className="level-up-backdrop"
+        aria-label="Dismiss level up"
         onClick={onDismiss}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -33,94 +39,94 @@ export function SkillUnlockModal({ event, onDismiss }: SkillUnlockModalProps) {
       />
 
       <motion.div
-        className="skill-unlock-modal"
+        className="level-up-modal"
         initial={{ opacity: 0, scale: 0.88, y: 24 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.94, y: 12 }}
         transition={{ type: 'spring', stiffness: 320, damping: 26 }}
       >
-        <div className="skill-unlock-modal-rays" aria-hidden="true" />
-        <div className="skill-unlock-modal-glow" aria-hidden="true" />
+        <div className="level-up-modal-rays" aria-hidden="true" />
+        <div className="level-up-modal-glow" aria-hidden="true" />
 
         <motion.div
-          className="skill-unlock-modal-badge"
+          className="level-up-modal-badge"
           aria-hidden="true"
           initial={{ scale: 0, rotate: -20 }}
           animate={{ scale: 1, rotate: 0 }}
           transition={{ type: 'spring', stiffness: 420, damping: 18, delay: 0.1 }}
         >
-          ✦
+          {progression.level}
         </motion.div>
 
         <motion.p
-          className="skill-unlock-modal-kicker"
+          className="level-up-modal-kicker"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.15, duration: 0.35 }}
         >
-          Achievement unlocked
+          Rank advanced
         </motion.p>
 
         <motion.h2
-          id="skill-unlock-title"
-          className="skill-unlock-modal-title"
+          id="level-up-title"
+          className="level-up-modal-title"
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.22, duration: 0.4 }}
         >
-          Skill Unlocked!
+          Level Up!
         </motion.h2>
 
         <motion.p
-          className="skill-unlock-modal-name"
+          className="level-up-modal-rank"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.32, duration: 0.35 }}
         >
-          {toolName}
+          {progression.rankTitle}
         </motion.p>
 
         <motion.p
-          className="skill-unlock-modal-desc"
+          className="level-up-modal-desc"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.4, duration: 0.35 }}
         >
-          This skill is now in your loadout and ready to cast.
+          ADA grows stronger with every quest and skill forged.
         </motion.p>
 
         <motion.p
-          className="skill-unlock-modal-xp-source"
+          className="level-up-modal-xp-source"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.44, duration: 0.35 }}
         >
-          +{xpGained} XP · Skill unlocked · {progression.rankTitle}
+          +{xpGained} XP · {XP_SOURCE_LABELS[source]} · {progression.rankTitle}
         </motion.p>
 
         <motion.div
-          className="skill-unlock-modal-stats"
+          className="level-up-modal-stats"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.48, duration: 0.35 }}
         >
-          <div className="skill-unlock-modal-stat">
-            <span className="skill-unlock-modal-stat-label">XP gained</span>
-            <span className="skill-unlock-modal-stat-value skill-unlock-xp">
-              +{xpGained}
-            </span>
+          <div className="level-up-modal-stat">
+            <span className="level-up-modal-stat-label">XP gained</span>
+            <span className="level-up-modal-stat-value level-up-xp">+{xpGained}</span>
           </div>
-          <div className="skill-unlock-modal-stat">
-            <span className="skill-unlock-modal-stat-label">Level</span>
-            <span className="skill-unlock-modal-stat-value">
-              {progression.isMaxLevel ? 'Lv. 50 MAX' : `Lv. ${progression.level}`}
+          <div className="level-up-modal-stat">
+            <span className="level-up-modal-stat-label">Level</span>
+            <span className="level-up-modal-stat-value">
+              {previousLevel < progression.level
+                ? `Lv. ${previousLevel} → ${levelLabel}`
+                : levelLabel}
             </span>
           </div>
         </motion.div>
 
-        <div className="skill-unlock-progress skill-unlock-modal-progress" aria-hidden="true">
+        <div className="level-up-progress level-up-modal-progress" aria-hidden="true">
           <motion.span
-            className="skill-unlock-progress-fill"
+            className="level-up-progress-fill"
             initial={{ width: 0 }}
             animate={{ width: `${progressPct}%` }}
             transition={{ delay: 0.55, duration: 0.75, ease: 'easeOut' }}
@@ -129,7 +135,7 @@ export function SkillUnlockModal({ event, onDismiss }: SkillUnlockModalProps) {
 
         <motion.button
           type="button"
-          className="btn-primary skill-unlock-modal-continue"
+          className="btn-primary level-up-modal-continue"
           onClick={onDismiss}
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}

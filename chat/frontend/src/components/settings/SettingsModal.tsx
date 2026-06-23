@@ -2,9 +2,10 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useEffect, useState } from 'react'
 import { useAppStore } from '../../state/store'
 import { AgentsSettings } from './AgentsSettings'
+import { ProgressSettings } from './ProgressSettings'
 import { PromptsEditor } from './PromptsEditor'
 
-type SettingsSection = 'agents' | 'prompts'
+type SettingsSection = 'agents' | 'prompts' | 'progress'
 
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description: string }> = [
   {
@@ -16,6 +17,11 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description
     id: 'prompts',
     label: 'Model prompts',
     description: 'Scout agent & Forge master instructions',
+  },
+  {
+    id: 'progress',
+    label: 'Progress',
+    description: 'Level, skills & supply cache',
   },
 ]
 
@@ -99,6 +105,7 @@ export function SettingsModal() {
               <div className="settings-content scroll-area">
                 {activeSection === 'agents' ? <AgentsSettings /> : null}
                 {activeSection === 'prompts' ? <PromptsEditor /> : null}
+                {activeSection === 'progress' ? <ProgressSettings /> : null}
               </div>
             </div>
           </motion.div>
