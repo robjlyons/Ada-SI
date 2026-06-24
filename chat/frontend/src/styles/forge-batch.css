@@ -1,0 +1,223 @@
+
+/* --- Multi-tool forge batch --- */
+
+.forge-batch-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(6, 8, 14, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.forge-batch-modal {
+  width: min(96vw, 1100px);
+  max-height: min(88vh, 820px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.forge-batch-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.forge-batch-modal-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.forge-batch-modal-summary {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted, #9aa3b2);
+}
+
+.forge-batch-modal-header-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.forge-batch-confirm-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.forge-batch-confirm-lead {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
+.forge-batch-confirm-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.forge-batch-confirm-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.forge-batch-confirm-list strong {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.85rem;
+}
+
+.forge-batch-confirm-list span {
+  font-size: 0.8rem;
+  color: var(--text-muted, #9aa3b2);
+}
+
+.forge-batch-columns {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding-bottom: 0.35rem;
+  min-height: 320px;
+  max-height: 52vh;
+}
+
+.mini-forge-column {
+  flex: 0 0 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.65rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.2);
+  max-height: 100%;
+}
+
+.mini-forge-column-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.mini-forge-column-title {
+  margin: 0;
+  font-size: 0.88rem;
+  font-family: var(--font-mono, monospace);
+  word-break: break-word;
+}
+
+.mini-forge-column-badge {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #9aa3b2);
+}
+
+.mini-forge-column-body {
+  flex: 1;
+  min-height: 80px;
+  font-size: 0.75rem;
+}
+
+.mini-forge-column-plan {
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.mini-forge-column-log {
+  margin: 0.5rem 0 0;
+  font-size: 0.68rem;
+  white-space: pre-wrap;
+  color: var(--text-muted, #9aa3b2);
+}
+
+.mini-forge-column-error {
+  margin: 0;
+  color: #f87171;
+  font-size: 0.75rem;
+}
+
+.mini-forge-column-gate,
+.mini-forge-column-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.mini-forge-column-gate textarea,
+.mini-forge-feedback {
+  width: 100%;
+  font-size: 0.75rem;
+  resize: vertical;
+}
+
+.mini-forge-column-btn-row,
+.mini-forge-column-gate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.forge-batch-modal-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tool-viewer-phases-compact .tool-viewer-phase {
+  font-size: 0.58rem;
+  padding: 0.15rem 0.25rem;
+}
+
+.forge-batch-dock {
+  position: fixed;
+  bottom: 1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 16, 28, 0.92);
+  color: inherit;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.forge-batch-dock-attention {
+  border-color: rgba(250, 204, 21, 0.55);
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.2);
+}
+
+.forge-batch-dock-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.forge-batch-dock-progress {
+  font-size: 0.75rem;
+  color: var(--text-muted, #9aa3b2);
+}

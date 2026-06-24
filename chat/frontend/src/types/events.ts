@@ -70,6 +70,7 @@ export type PromptsConfig = {
   forge_fix_runtime_prompt: string
   tool_generate_new_description: string
   tool_edit_existing_description: string
+  tool_propose_batch_description: string
 }
 
 export type EffectivePrompts = {
@@ -233,6 +234,64 @@ export type AdaEventType =
   | 'open_skill_app'
   | 'skill_data_changed'
   | 'chat_error'
+  | 'forge_batch_proposed'
+  | 'forge_batch_plan_phase_started'
+  | 'forge_batch_plan_phase_done'
+  | 'forge_batch_plan_started'
+  | 'forge_batch_plan_thinking_delta'
+  | 'forge_batch_plan_content_delta'
+  | 'forge_batch_plan_ready'
+  | 'forge_batch_plan_failed'
+  | 'forge_batch_build_started'
+  | 'forge_batch_build_done'
+  | 'forge_batch_complete'
+  | 'forge_batch_code_thinking_delta'
+  | 'forge_batch_code_delta'
+
+export type ForgeBatchColumnStatus =
+  | 'queued'
+  | 'drafting'
+  | 'plan_ready'
+  | 'plan_approved'
+  | 'building'
+  | 'pip_pending'
+  | 'ui_preview_pending'
+  | 'done'
+  | 'failed'
+  | 'skipped'
+
+export type ForgeBatchToolColumn = {
+  planId: string
+  toolName: string
+  description: string
+  status: ForgeBatchColumnStatus
+  draftThinking: string
+  draftPlanText: string
+  planMarkdown: string
+  feedback: string
+  busy: boolean
+  viewerPhases: Record<string, PhaseStatus>
+  viewerOutput: string[]
+  codeThinking: string
+  codeStream: string
+  toolCode: string
+  testCode: string
+  pipInstall?: PipInstallState
+  uiPreview?: UiPreviewState
+  resultError?: string
+  lastSuccessMessage?: string
+}
+
+export type ForgeBatchModalMode = 'confirming' | 'expanded' | 'minimized' | 'closed'
+
+export type ForgeBatchState = {
+  batchId: string
+  runId: string
+  summary: string
+  modalMode: ForgeBatchModalMode
+  tools: ForgeBatchToolColumn[]
+  proposedTools: Array<{ tool_name: string; description: string; plan_id: string }>
+}
 
 export type ProcessStepEvent = {
   ada_event: 'process_step'
@@ -318,6 +377,71 @@ export type AdaEvent =
   | { ada_event: 'open_skill_app'; run_id: string; skill_name: string }
   | { ada_event: 'skill_data_changed'; run_id: string; skill_name: string }
   | { ada_event: 'chat_error'; run_id?: string; detail?: string }
+  | {
+      ada_event: 'forge_batch_proposed'
+      run_id: string
+      batch_id: string
+      summary: string
+      tools: Array<{ tool_name: string; description: string; plan_id: string }>
+    }
+  | {
+      ada_event: 'forge_batch_plan_phase_started' | 'forge_batch_plan_phase_done'
+      run_id: string
+      batch_id: string
+    }
+  | {
+      ada_event: 'forge_batch_plan_started'
+      run_id: string
+      batch_id: string
+      plan_id: string
+      tool_name: string
+    }
+  | {
+      ada_event: 'forge_batch_plan_thinking_delta' | 'forge_batch_plan_content_delta'
+      run_id: string
+      batch_id: string
+      plan_id: string
+      tool_name?: string
+      delta?: string
+    }
+  | {
+      ada_event: 'forge_batch_plan_ready'
+      run_id: string
+      batch_id: string
+      plan_id: string
+      tool_name: string
+      plan: string
+    }
+  | {
+      ada_event: 'forge_batch_plan_failed'
+      run_id: string
+      batch_id: string
+      plan_id: string
+      tool_name?: string
+      reason?: string
+    }
+  | {
+      ada_event: 'forge_batch_build_started' | 'forge_batch_build_done'
+      run_id: string
+      batch_id: string
+      plan_id: string
+      tool_name?: string
+      status?: string
+    }
+  | {
+      ada_event: 'forge_batch_complete'
+      run_id: string
+      batch_id: string
+      summary: string
+    }
+  | {
+      ada_event: 'forge_batch_code_thinking_delta' | 'forge_batch_code_delta'
+      run_id: string
+      batch_id: string
+      plan_id: string
+      tool_name?: string
+      delta?: string
+    }
 
 export type OpenAIStreamChunk = {
   choices?: Array<{
@@ -366,6 +490,27 @@ export function createDefaultViewerPhases(): Record<string, PhaseStatus> {
     pip_review: 'pending',
     runtime_verify: 'pending',
     install_tool: 'pending',
+  }
+}
+
+export function createForgeBatchColumn(
+  partial: Pick<ForgeBatchToolColumn, 'planId' | 'toolName' | 'description'> &
+    Partial<ForgeBatchToolColumn>,
+): ForgeBatchToolColumn {
+  return {
+    status: 'queued',
+    draftThinking: '',
+    draftPlanText: '',
+    planMarkdown: '',
+    feedback: '',
+    busy: false,
+    viewerPhases: createDefaultViewerPhases(),
+    viewerOutput: [],
+    codeThinking: '',
+    codeStream: '',
+    toolCode: '',
+    testCode: '',
+    ...partial,
   }
 }
 

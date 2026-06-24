@@ -118,3 +118,41 @@ export async function rejectPreview(previewId: string, runId: string): Promise<v
     body: JSON.stringify({ preview_id: previewId, run_id: runId }),
   })
 }
+
+export async function cancelForgeBatch(batchId: string): Promise<void> {
+  await requestJson('/api/forge_batch/cancel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batch_id: batchId }),
+  })
+}
+
+export async function approveForgeBatchPlan(
+  batchId: string,
+  planId: string,
+): Promise<void> {
+  await requestJson('/api/forge_batch/approve_plan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batch_id: batchId, plan_id: planId }),
+  })
+}
+
+export async function approveAllForgeBatchPlans(batchId: string): Promise<void> {
+  await requestJson('/api/forge_batch/approve_all_plans', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batch_id: batchId }),
+  })
+}
+
+export async function rejectForgeBatchPlan(
+  batchId: string,
+  planId: string,
+): Promise<void> {
+  await requestJson('/api/forge_batch/reject_plan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batch_id: batchId, plan_id: planId }),
+  })
+}

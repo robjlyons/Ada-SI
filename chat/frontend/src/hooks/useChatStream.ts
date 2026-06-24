@@ -124,6 +124,24 @@ export function useChatStream() {
     [store],
   )
 
+  const handleForgeBatchProposed = useCallback(
+    (json: AdaEvent & { ada_event: 'forge_batch_proposed' }, assistantId: string | null) => {
+      store.openForgeBatchProposal({
+        batchId: json.batch_id,
+        runId: json.run_id,
+        summary: json.summary,
+        tools: json.tools,
+      })
+      if (assistantId) store.removeFeedItem(assistantId)
+      store.pushConversation({
+        role: 'assistant',
+        content: `[System] Multi-tool forge proposed: ${json.summary}`,
+      })
+      store.setStatus('')
+    },
+    [store],
+  )
+
   const sendMessage = useCallback(
     async (content: string) => {
       if (store.isSending) return
@@ -149,6 +167,7 @@ export function useChatStream() {
 
       const assistantId = store.addAssistantMessage()
       let planReceived = false
+      let batchReceived = false
 
       try {
         await consumeSseStream({
@@ -186,6 +205,11 @@ export function useChatStream() {
                 handlePlanPending(json, assistantId)
                 return
               }
+              if (json.ada_event === 'forge_batch_proposed') {
+                batchReceived = true
+                handleForgeBatchProposed(json, assistantId)
+                return
+              }
             }
 
             const delta = 'choices' in json ? json.choices?.[0]?.delta : undefined
@@ -206,7 +230,9 @@ export function useChatStream() {
           },
         })
 
-        if (planReceived) {
+        if (batchReceived) {
+          store.setStatus('')
+        } else if (planReceived) {
           store.pushConversation({
             role: 'assistant',
             content: '[System] A new skill blueprint awaits your approval.',
@@ -276,6 +302,7 @@ export function useChatStream() {
       handlePlanThinkingDelta,
       handlePlanContentDelta,
       handlePlanPending,
+      handleForgeBatchProposed,
     ],
   )
 

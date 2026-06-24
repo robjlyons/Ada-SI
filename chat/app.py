@@ -3,6 +3,7 @@ import logging
 import os
 import time
 import uuid
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import httpx
@@ -19,6 +20,26 @@ from prompts_config import (
     save_prompts_config,
 )
 from build_ui_qa import stream_interactive_ui_qa
+from forge_batch import (
+    RUNTIME_INSTALL_LOCK,
+    approve_all_plans,
+    approve_plan,
+    batch_sse,
+    batch_terminal,
+    build_resume_summary,
+    cancel_batch,
+    create_batch,
+    get_pending_batch,
+    merge_async_generators,
+    mark_batch_tool_failed,
+    mark_batch_tool_installed,
+    plan_ids_ready_to_build,
+    reject_plan,
+    set_entry_status,
+    stream_batch_plan_revision,
+    stream_parallel_plan_phase,
+    validate_batch_tools,
+)
 from build_pipeline import (
     PENDING_PIP_INSTALLS,
     PENDING_UI_PREVIEWS,
@@ -99,6 +120,7 @@ from tools_engine import (
     write_skill_data,
     write_tool_files,
 )
+from tool_build_stream import stream_tool_build
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -308,6 +330,42 @@ def sse_data(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
+def _batch_tag_payload(
+    payload: dict,
+    *,
+    batch_id: str,
+    plan_id: str,
+    tool_name: str,
+) -> dict:
+    if not batch_id:
+        return payload
+    tagged = dict(payload)
+    tagged["batch_id"] = batch_id
+    tagged["plan_id"] = plan_id
+    tagged["tool_name"] = tool_name
+    return tagged
+
+
+def _maybe_emit_batch_complete(batch_id: str, run_id: str) -> str | None:
+    if not batch_id:
+        return None
+    try:
+        batch_ref = get_pending_batch(batch_id)
+    except ValueError:
+        return None
+    if not batch_terminal(batch_ref):
+        return None
+    batch_ref["status"] = "complete"
+    return batch_sse(
+        {
+            "ada_event": "forge_batch_complete",
+            "run_id": run_id,
+            "summary": build_resume_summary(batch_ref),
+        },
+        batch_id=batch_id,
+    )
+
+
 def process_step(
     run_id: str,
     step_id: str,
@@ -465,6 +523,61 @@ async def run_agent_stream(
                 fn = tool_call.get("function", {})
                 name = fn.get("name", "")
                 args = parse_tool_arguments(fn.get("arguments", "{}"))
+
+                if name == "propose_tool_batch":
+                    tools_raw = args.get("tools", [])
+                    summary = str(args.get("summary", "")).strip()
+                    log_tool_execution(
+                        run_id,
+                        name=name,
+                        arguments=args,
+                        result="(proposing multi-tool batch)",
+                    )
+                    if not summary:
+                        raise HTTPException(
+                            status_code=502,
+                            detail="propose_tool_batch missing summary.",
+                        )
+                    if not tool_creator_model:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="No tool creator model configured. Select one in the UI.",
+                        )
+                    try:
+                        tools = validate_batch_tools(tools_raw, tool_exists=tool_exists)
+                    except ValueError as exc:
+                        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+                    batch_id, batch = create_batch(
+                        run_id=run_id,
+                        tools=tools,
+                        summary=summary,
+                        creator_model=tool_creator_model,
+                        reasoning_effort=reasoning_effort,
+                    )
+                    yield process_step(
+                        run_id,
+                        "route_creator",
+                        "Proposed multi-tool forge batch",
+                        "done",
+                        model=tool_creator_model,
+                        detail=f"{len(tools)} tools",
+                    )
+                    yield {
+                        "_event": "forge_batch_proposed",
+                        "batch_id": batch_id,
+                        "run_id": run_id,
+                        "summary": summary,
+                        "tools": [
+                            {
+                                "tool_name": entry["tool_name"],
+                                "description": entry["description"],
+                                "plan_id": entry["plan_id"],
+                            }
+                            for entry in batch["tools"]
+                        ],
+                    }
+                    return
 
                 if name == "generate_new_tool":
                     tool_name = args.get("tool_name", "").strip()
@@ -1152,6 +1265,19 @@ async def chat(request: Request) -> StreamingResponse:
                     yield "data: [DONE]\n\n"
                     return
 
+                if item.get("_event") == "forge_batch_proposed":
+                    yield sse_data(
+                        {
+                            "ada_event": "forge_batch_proposed",
+                            "run_id": item["run_id"],
+                            "batch_id": item["batch_id"],
+                            "summary": item["summary"],
+                            "tools": item["tools"],
+                        }
+                    )
+                    yield "data: [DONE]\n\n"
+                    return
+
                 if item.get("_event") == "done":
                     yield "data: [DONE]\n\n"
                     return
@@ -1236,415 +1362,313 @@ async def approve_tool(request: Request, payload: dict = Body(...)) -> Streaming
     )
 
     async def approval_stream():
-        clear_run_cancelled(run_id)
-        log_build_event(
-            run_id,
-            phase="approve",
-            message=(
-                f"build started plan_id={plan_id} tool={tool_name} "
-                f"creator_model={creator_model}"
-            ),
-        )
-
-        def step(step_id: str, label: str, status: str, *, detail: str = ""):
-            if not run_id:
-                return ""
-            return process_step(
-                run_id,
-                step_id,
-                label,
-                status,
-                model=creator_model,
-                detail=detail,
-            )
-
-        def phase(step_id: str, status: str, *, detail: str = ""):
-            if not run_id:
-                return ""
-            return tool_build_phase(run_id, step_id, status, detail=detail)
-
-        def blog(message: str, *, level: str = "info"):
-            if not run_id:
-                return ""
-            return tool_build_log(run_id, message, level=level)
-
-        async def cancelled() -> bool:
-            return is_run_cancelled(run_id) or await request.is_disconnected()
-
-        yield step("awaiting_approval", "Awaiting your approval", "done")
-        yield phase("generate_code", "active")
-        yield step("generate_code", "Generating tool code", "active")
-        yield blog("Generating tool code…")
-        if await cancelled():
-            for event in cancelled_events(run_id, "generate_code", model=creator_model):
-                yield event
-            return
-
-        edit_context = plan_data.get("edit_context") if plan_data.get("kind") == "edit" else None
-
-        accumulated = ""
-        try:
-            async for kind, delta in generate_tool_code_stream(
-                plan_data["plan"],
-                tool_name,
-                creator_model,
-                litellm_url=LITELLM_URL,
-                headers=litellm_headers(),
-                run_id=run_id,
-                edit_context=edit_context if plan_data.get("kind") == "edit" else None,
-                reasoning_effort=reasoning_effort,
-            ):
-                if await cancelled():
-                    for event in cancelled_events(
-                        run_id, "generate_code", model=creator_model
-                    ):
-                        yield event
-                    return
-                if kind == "reasoning":
-                    yield sse_data(
-                        {
-                            "ada_event": "tool_code_thinking_delta",
-                            "run_id": run_id,
-                            "delta": delta,
-                        }
-                    )
-                    continue
-                accumulated += delta
-                yield sse_data(
-                    {
-                        "ada_event": "tool_code_delta",
-                        "run_id": run_id,
-                        "delta": delta,
-                    }
-                )
-
-            tool_code = ""
-            test_code = ""
-            requirements: list[str] = []
-            manifest: dict | None = None
-            ui_files: dict[str, str] | None = None
-            parse_error: Exception | None = None
-            for parse_attempt in range(PHASE_MAX_RETRIES):
-                try:
-                    if parse_attempt == 0:
-                        (
-                            tool_code,
-                            test_code,
-                            requirements,
-                            manifest,
-                            ui_files,
-                        ) = parse_generated_tool_response(accumulated)
-                    break
-                except Exception as exc:
-                    parse_error = exc
-                    if parse_attempt < PHASE_MAX_RETRIES - 1:
-                        yield blog(
-                            f"Codegen JSON invalid ({exc}) — auto-repairing…",
-                            level="warn",
-                        )
-                        (
-                            tool_code,
-                            test_code,
-                            requirements,
-                            manifest,
-                            ui_files,
-                        ) = await repair_generated_tool_response(
-                            plan_data["plan"],
-                            tool_name,
-                            accumulated,
-                            str(exc),
-                            creator_model,
-                            litellm_url=LITELLM_URL,
-                            headers=litellm_headers(),
-                            run_id=run_id,
-                            edit_context=edit_context,
-                            reasoning_effort=reasoning_effort,
-                        )
-                        break
-                    raise parse_error from exc
-
-            if manifest:
-                manifest_ok, manifest_reason = validate_manifest(manifest, tool_name)
-                if not manifest_ok:
-                    raise ValueError(f"Invalid manifest: {manifest_reason}")
-                ui_ok, ui_reason = validate_ui_files(ui_files, manifest, tool_name)
-                if not ui_ok:
-                    raise ValueError(f"Invalid ui_files: {ui_reason}")
-
-            log_generated_code(
-                run_id,
-                tool_name=tool_name,
-                tool_code=tool_code,
-                test_code=test_code,
-            )
-            yield sse_data(
-                {
-                    "ada_event": "tool_code_ready",
-                    "run_id": run_id,
-                    "tool_name": tool_name,
-                    "tool_code": tool_code,
-                    "test_code": test_code,
-                    "requirements": requirements,
-                    "manifest": manifest,
-                }
-            )
-            yield blog("Code generated successfully.")
-        except Exception as exc:
-            log_build_event(
-                run_id, phase="generate_code", message=str(exc), level="error"
-            )
-            yield step("generate_code", "Generating tool code", "error", detail=str(exc))
-            yield phase("generate_code", "error", detail=str(exc))
-            yield blog(str(exc), level="error")
-            yield sse_data(
-                {
-                    "ada_event": "tool_build_failed",
-                    "run_id": run_id,
-                    "tool_name": tool_name,
-                    "reason": str(exc),
-                }
-            )
-            yield "data: [DONE]\n\n"
-            return
-
-        yield step("generate_code", "Generating tool code", "done")
-        yield phase("generate_code", "done")
-
-        if await cancelled():
-            for event in cancelled_events(run_id, "validate_code", model=creator_model):
-                yield event
-            return
-
-        yield step("validate_code", "Validating module structure", "active")
-        yield phase("validate_code", "active")
-        yield blog("Validating module structure…")
-
-        validation_failed = False
-        validation_reason = ""
-        for val_attempt in range(PHASE_MAX_RETRIES):
-            schema_ok, schema_reason = validate_tool_schema(tool_code)
-            test_ok, test_reason = validate_test_code(test_code)
-            if schema_ok and test_ok:
-                validation_failed = False
-                break
-
-            errors: list[str] = []
-            if not schema_ok:
-                errors.append(schema_reason)
-            if not test_ok:
-                errors.append(test_reason)
-            validation_reason = "; ".join(errors)
-
-            if val_attempt < PHASE_MAX_RETRIES - 1:
-                yield blog(
-                    f"Validation failed — auto-fixing ({validation_reason})…",
-                    level="warn",
-                )
-                try:
-                    tool_code, test_code = await fix_validation_errors(
-                        tool_name,
-                        tool_code,
-                        test_code,
-                        validation_reason,
-                        creator_model,
-                        litellm_url=LITELLM_URL,
-                        headers=litellm_headers(),
-                        run_id=run_id,
-                        reasoning_effort=reasoning_effort,
-                    )
-                    yield sse_data(
-                        {
-                            "ada_event": "tool_code_ready",
-                            "run_id": run_id,
-                            "tool_name": tool_name,
-                            "tool_code": tool_code,
-                            "test_code": test_code,
-                            "requirements": requirements,
-                        }
-                    )
-                    continue
-                except Exception as fix_exc:
-                    validation_reason = str(fix_exc)
-                    validation_failed = True
-                    break
-            validation_failed = True
-            break
-
-        if validation_failed:
-            log_build_event(
-                run_id, phase="validate_code", message=validation_reason, level="error"
-            )
-            yield step(
-                "validate_code", "Validating module structure", "error", detail=validation_reason
-            )
-            yield phase("validate_code", "error", detail=validation_reason)
-            yield blog(validation_reason, level="error")
-            yield sse_data(
-                {
-                    "ada_event": "tool_build_failed",
-                    "run_id": run_id,
-                    "tool_name": tool_name,
-                    "reason": validation_reason,
-                }
-            )
-            yield "data: [DONE]\n\n"
-            return
-
-        yield step("validate_code", "Validating module structure", "done")
-        yield phase("validate_code", "done")
-        yield blog("Module structure and test_code look valid.")
-
-        if await cancelled():
-            for event in cancelled_events(run_id, "sandbox_test", model=creator_model):
-                yield event
-            return
-
-        yield step("sandbox_test", "Running verification tests", "active")
-        yield phase("sandbox_test", "active")
-        yield blog("Running verification tests in isolated venv…")
-
-        sandbox_success, log_output, test_code, tool_code, sandbox_notices = (
-            await run_sandbox_phase(
-            run_id=run_id,
-            tool_name=tool_name,
-            tool_code=tool_code,
-            test_code=test_code,
-            requirements=requirements,
-            manifest=manifest,
-            creator_model=creator_model,
-            litellm_url=LITELLM_URL,
-            headers=litellm_headers(),
-            step=step,
-            phase=phase,
-            blog=blog,
-            sse_data=sse_data,
-            cancelled=cancelled,
-            reasoning_effort=reasoning_effort,
-        )
-        )
-        for level, message in sandbox_notices:
-            yield blog(message, level=level)
-        log_sandbox(
-            run_id,
-            tool_name=tool_name,
-            success=sandbox_success,
-            logs=log_output,
-            attempt=PHASE_MAX_RETRIES - 1 if not sandbox_success else 0,
-        )
-
-        if not sandbox_success:
-            yield step(
-                "sandbox_test",
-                "Running verification tests",
-                "error",
-                detail=log_output[:500],
-            )
-            yield phase("sandbox_test", "error", detail=log_output[:200])
-            yield blog(log_output, level="error")
-            yield sse_data(
-                {
-                    "ada_event": "tool_build_failed",
-                    "run_id": run_id,
-                    "tool_name": tool_name,
-                    "reason": "Verification tests failed.",
-                    "logs": log_output,
-                }
-            )
-            yield "data: [DONE]\n\n"
-            return
-
-        yield step("sandbox_test", "Running verification tests", "done")
-        yield phase("sandbox_test", "done")
-        yield blog("Verification tests passed.")
-
-        qa_passed = False
-        async for event, done, new_tool, new_test, new_manifest, new_ui in stream_interactive_ui_qa(
-            run_id=run_id,
-            tool_name=tool_name,
-            tool_code=tool_code,
-            test_code=test_code,
-            manifest=manifest,
-            ui_files=ui_files,
-            creator_model=creator_model,
-            litellm_url=LITELLM_URL,
-            headers=litellm_headers(),
-            reasoning_effort=reasoning_effort,
-            step=step,
-            phase=phase,
-            blog=blog,
-            cancelled=cancelled,
-        ):
-            if event:
-                yield event
-            if done:
-                qa_passed = True
-                tool_code = new_tool
-                test_code = new_test
-                manifest = new_manifest
-                ui_files = new_ui
-                break
-
-        if not qa_passed:
-            yield sse_data(
-                {
-                    "ada_event": "tool_build_failed",
-                    "run_id": run_id,
-                    "tool_name": tool_name,
-                    "reason": "Interactive app QA failed.",
-                }
-            )
-            yield "data: [DONE]\n\n"
-            return
-
-        preview_paused, preview_events = await maybe_pause_for_ui_preview(
-            run_id=run_id,
+        async for event in stream_tool_build(
             plan_id=plan_id,
-            tool_name=tool_name,
-            tool_code=tool_code,
-            test_code=test_code,
-            requirements=requirements,
-            manifest=manifest,
-            ui_files=ui_files,
-            creator_model=creator_model,
-            step=step,
-            phase=phase,
-            sse_data=sse_data,
-            blog=blog,
-            reasoning_effort=reasoning_effort,
-        )
-        if preview_paused and preview_events:
-            async for event in preview_events:
-                yield event
-            return
-
-        async for event in continue_tool_build(
+            plan_data=plan_data,
             run_id=run_id,
-            plan_id=plan_id,
-            tool_name=tool_name,
-            tool_code=tool_code,
-            test_code=test_code,
-            requirements=requirements,
-            manifest=manifest,
-            ui_files=ui_files,
             creator_model=creator_model,
+            reasoning_effort=reasoning_effort,
+            request=request,
             litellm_url=LITELLM_URL,
             litellm_headers=litellm_headers(),
-            step=step,
-            phase=phase,
-            blog=blog,
+            pending_plans=PENDING_PLANS,
+            process_step=process_step,
+            tool_build_phase=tool_build_phase,
+            tool_build_log=tool_build_log,
             sse_data=sse_data,
-            cancelled=cancelled,
-            reasoning_effort=reasoning_effort,
-            preview_already_installed=False,
+            cancelled_events=cancelled_events,
+            is_run_cancelled=is_run_cancelled,
+            clear_run_cancelled=clear_run_cancelled,
         ):
             yield event
-
-        del PENDING_PLANS[plan_id]
-        clear_run_cancelled(run_id)
 
     return StreamingResponse(
         approval_stream(), media_type="text/event-stream", headers=SSE_HEADERS
     )
+
+
+@app.post("/api/forge_batch/confirm")
+async def forge_batch_confirm(request: Request, payload: dict = Body(...)) -> StreamingResponse:
+    batch_id = payload.get("batch_id", "").strip()
+    if not batch_id:
+        raise HTTPException(status_code=400, detail="batch_id is required.")
+
+    try:
+        batch = get_pending_batch(batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if batch.get("status") == "cancelled":
+        raise HTTPException(status_code=400, detail="Batch was cancelled.")
+
+    async def confirm_stream():
+        async def cancelled() -> bool:
+            return is_run_cancelled(batch["run_id"]) or await request.is_disconnected()
+
+        async for event in stream_parallel_plan_phase(
+            batch_id=batch_id,
+            litellm_url=LITELLM_URL,
+            headers=litellm_headers(),
+            pending_plans=PENDING_PLANS,
+            cancelled=cancelled,
+        ):
+            yield event
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(confirm_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@app.post("/api/forge_batch/cancel")
+async def forge_batch_cancel(payload: dict = Body(...)) -> dict:
+    batch_id = payload.get("batch_id", "").strip()
+    if not batch_id:
+        raise HTTPException(status_code=400, detail="batch_id is required.")
+    try:
+        cancel_batch(batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": "cancelled", "batch_id": batch_id}
+
+
+@app.post("/api/forge_batch/approve_plan")
+async def forge_batch_approve_plan(payload: dict = Body(...)) -> dict:
+    batch_id = payload.get("batch_id", "").strip()
+    plan_id = payload.get("plan_id", "").strip()
+    if not batch_id or not plan_id:
+        raise HTTPException(status_code=400, detail="batch_id and plan_id are required.")
+    try:
+        approve_plan(batch_id, plan_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "approved", "batch_id": batch_id, "plan_id": plan_id}
+
+
+@app.post("/api/forge_batch/approve_all_plans")
+async def forge_batch_approve_all_plans(payload: dict = Body(...)) -> dict:
+    batch_id = payload.get("batch_id", "").strip()
+    if not batch_id:
+        raise HTTPException(status_code=400, detail="batch_id is required.")
+    try:
+        approve_all_plans(batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": "approved_all", "batch_id": batch_id}
+
+
+@app.post("/api/forge_batch/reject_plan")
+async def forge_batch_reject_plan(payload: dict = Body(...)) -> dict:
+    batch_id = payload.get("batch_id", "").strip()
+    plan_id = payload.get("plan_id", "").strip()
+    if not batch_id or not plan_id:
+        raise HTTPException(status_code=400, detail="batch_id and plan_id are required.")
+    try:
+        reject_plan(batch_id, plan_id)
+        if plan_id in PENDING_PLANS:
+            del PENDING_PLANS[plan_id]
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": "skipped", "batch_id": batch_id, "plan_id": plan_id}
+
+
+@app.post("/api/forge_batch/revise_plan")
+async def forge_batch_revise_plan(request: Request, payload: dict = Body(...)) -> StreamingResponse:
+    batch_id = payload.get("batch_id", "").strip()
+    plan_id = payload.get("plan_id", "").strip()
+    feedback = payload.get("feedback", "").strip()
+    if not batch_id or not plan_id:
+        raise HTTPException(status_code=400, detail="batch_id and plan_id are required.")
+    if not feedback:
+        raise HTTPException(status_code=400, detail="feedback is required.")
+
+    try:
+        batch = get_pending_batch(batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    async def revise_stream():
+        async def cancelled() -> bool:
+            return is_run_cancelled(batch["run_id"]) or await request.is_disconnected()
+
+        try:
+            async for event in stream_batch_plan_revision(
+                batch_id=batch_id,
+                plan_id=plan_id,
+                feedback=feedback,
+                litellm_url=LITELLM_URL,
+                headers=litellm_headers(),
+                pending_plans=PENDING_PLANS,
+                cancelled=cancelled,
+            ):
+                yield event
+        except ValueError as exc:
+            yield batch_sse(
+                {
+                    "ada_event": "forge_batch_plan_failed",
+                    "run_id": batch["run_id"],
+                    "reason": str(exc),
+                },
+                batch_id=batch_id,
+                plan_id=plan_id,
+            )
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(revise_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@app.post("/api/forge_batch/start_build")
+async def forge_batch_start_build(request: Request, payload: dict = Body(...)) -> StreamingResponse:
+    batch_id = payload.get("batch_id", "").strip()
+    plan_id = payload.get("plan_id", "").strip() or None
+    if not batch_id:
+        raise HTTPException(status_code=400, detail="batch_id is required.")
+
+    try:
+        batch = get_pending_batch(batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    try:
+        plan_ids = plan_ids_ready_to_build(batch, plan_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    creator_model = (
+        payload.get("tool_creator_model") or batch["creator_model"]
+    ).strip()
+    if not creator_model:
+        raise HTTPException(status_code=400, detail="No tool creator model configured.")
+
+    reasoning_effort = resolve_reasoning_effort(
+        payload.get("reasoning_effort"),
+        default=TOOL_CREATOR_REASONING_EFFORT,
+    )
+    run_id = batch["run_id"]
+
+    def on_installed(pid: str, tool_name: str, message: str) -> None:
+        batch_ref = get_pending_batch(batch_id)
+        set_entry_status(batch_ref, pid, "done")
+        batch_ref["results"][pid] = {
+            "status": "installed",
+            "tool_name": tool_name,
+            "message": message,
+        }
+
+    def on_failed(pid: str, tool_name: str, reason: str) -> None:
+        batch_ref = get_pending_batch(batch_id)
+        set_entry_status(batch_ref, pid, "failed")
+        batch_ref["results"][pid] = {
+            "status": "failed",
+            "tool_name": tool_name,
+            "reason": reason,
+        }
+
+    async def build_one(pid: str) -> AsyncIterator[str]:
+        plan_data = get_pending_plan(pid)
+        set_entry_status(get_pending_batch(batch_id), pid, "building")
+        async for event in stream_tool_build(
+            plan_id=pid,
+            plan_data=plan_data,
+            run_id=run_id,
+            creator_model=creator_model,
+            reasoning_effort=reasoning_effort,
+            request=request,
+            litellm_url=LITELLM_URL,
+            litellm_headers=litellm_headers(),
+            pending_plans=PENDING_PLANS,
+            process_step=process_step,
+            tool_build_phase=tool_build_phase,
+            tool_build_log=tool_build_log,
+            sse_data=sse_data,
+            cancelled_events=cancelled_events,
+            is_run_cancelled=is_run_cancelled,
+            clear_run_cancelled=clear_run_cancelled,
+            batch_id=batch_id,
+            install_lock=RUNTIME_INSTALL_LOCK,
+            on_installed=on_installed,
+            on_failed=on_failed,
+            skip_plan_cleanup=False,
+        ):
+            yield event
+
+    async def merged_stream():
+        generators = [build_one(pid) for pid in plan_ids]
+        async for event in merge_async_generators(generators):
+            yield event
+        batch_ref = get_pending_batch(batch_id)
+        if batch_terminal(batch_ref):
+            batch_ref["status"] = "complete"
+            yield batch_sse(
+                {
+                    "ada_event": "forge_batch_complete",
+                    "run_id": run_id,
+                    "summary": build_resume_summary(batch_ref),
+                },
+                batch_id=batch_id,
+            )
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(merged_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@app.post("/api/forge_batch/resume_agent")
+async def forge_batch_resume_agent(request: Request, payload: dict = Body(...)) -> StreamingResponse:
+    batch_id = payload.get("batch_id", "").strip()
+    if not batch_id:
+        raise HTTPException(status_code=400, detail="batch_id is required.")
+
+    try:
+        batch = get_pending_batch(batch_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    lite_model = (payload.get("model") or LITE_MODEL).strip()
+    tool_creator_model = (
+        payload.get("tool_creator_model") or batch["creator_model"] or TOOL_CREATOR_MODEL
+    ).strip()
+    messages = payload.get("messages")
+    run_id = batch.get("run_id") or uuid.uuid4().hex
+    reasoning_effort = resolve_reasoning_effort(payload.get("reasoning_effort"))
+
+    if not lite_model:
+        raise HTTPException(status_code=400, detail="No lite model selected.")
+    if not isinstance(messages, list):
+        raise HTTPException(status_code=400, detail="messages must be a list.")
+
+    summary = build_resume_summary(batch)
+    resume_messages = [
+        *messages,
+        {
+            "role": "user",
+            "content": (
+                f"[System] Multi-tool forge batch completed.\n\n{summary}\n\n"
+                "Summarize what was installed for the user and suggest next steps."
+            ),
+        },
+    ]
+
+    async def resume_stream():
+        try:
+            async for item in run_agent_stream(
+                run_id,
+                lite_model,
+                tool_creator_model,
+                resume_messages,
+                request,
+                reasoning_effort=reasoning_effort,
+            ):
+                if await request.is_disconnected():
+                    return
+                if isinstance(item, str):
+                    yield item
+                    continue
+                if item.get("_event") == "done":
+                    yield "data: [DONE]\n\n"
+                    return
+        except HTTPException as exc:
+            yield sse_data({"ada_event": "chat_error", "run_id": run_id, "detail": exc.detail})
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(resume_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 @app.post("/api/approve_pip")
@@ -1662,6 +1686,7 @@ async def approve_pip(request: Request, payload: dict = Body(...)) -> StreamingR
     run_id = run_id or pip_data.get("run_id", "")
     plan_id = pip_data.get("plan_id", "")
     tool_name = pip_data["tool_name"]
+    batch_id = (pip_data.get("batch_id") or "").strip()
     creator_model = pip_data.get("creator_model", "")
 
     if not creator_model:
@@ -1674,6 +1699,7 @@ async def approve_pip(request: Request, payload: dict = Body(...)) -> StreamingR
 
     async def pip_stream():
         clear_run_cancelled(run_id)
+        install_succeeded = False
 
         def step(step_id: str, label: str, status: str, *, detail: str = ""):
             if not run_id:
@@ -1687,12 +1713,44 @@ async def approve_pip(request: Request, payload: dict = Body(...)) -> StreamingR
                 detail=detail,
             )
 
+        def emit(payload: dict) -> str:
+            nonlocal install_succeeded
+            if payload.get("ada_event") == "tool_installed":
+                install_succeeded = True
+            return sse_data(
+                _batch_tag_payload(
+                    payload,
+                    batch_id=batch_id,
+                    plan_id=plan_id,
+                    tool_name=tool_name,
+                )
+            )
+
         def phase(step_id: str, status: str, *, detail: str = ""):
+            if batch_id:
+                return emit(
+                    {
+                        "ada_event": "tool_build_phase",
+                        "run_id": run_id,
+                        "phase": step_id,
+                        "status": status,
+                        "detail": detail,
+                    }
+                )
             if not run_id:
                 return ""
             return tool_build_phase(run_id, step_id, status, detail=detail)
 
         def blog(message: str, *, level: str = "info"):
+            if batch_id:
+                return emit(
+                    {
+                        "ada_event": "tool_build_log",
+                        "run_id": run_id,
+                        "message": message,
+                        "level": level,
+                    }
+                )
             if not run_id:
                 return ""
             return tool_build_log(run_id, message, level=level)
@@ -1718,16 +1776,25 @@ async def approve_pip(request: Request, payload: dict = Body(...)) -> StreamingR
             step=step,
             phase=phase,
             blog=blog,
-            sse_data=sse_data,
+            sse_data=emit,
             cancelled=cancelled,
             skip_pip=False,
             reasoning_effort=reasoning_effort,
+            install_lock=RUNTIME_INSTALL_LOCK if batch_id else None,
         ):
             yield event
 
         PENDING_PIP_INSTALLS.pop(pip_id, None)
         if plan_id in PENDING_PLANS:
             del PENDING_PLANS[plan_id]
+
+        if install_succeeded and batch_id:
+            message = f"Tool '{tool_name}' installed in the persistent tool runtime."
+            mark_batch_tool_installed(batch_id, plan_id, tool_name, message)
+            complete = _maybe_emit_batch_complete(batch_id, run_id)
+            if complete:
+                yield complete
+
         clear_run_cancelled(run_id)
 
     return StreamingResponse(pip_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
@@ -1748,6 +1815,7 @@ async def approve_preview(request: Request, payload: dict = Body(...)) -> Stream
     run_id = run_id or preview_data.get("run_id", "")
     plan_id = preview_data.get("plan_id", "")
     tool_name = preview_data["tool_name"]
+    batch_id = (preview_data.get("batch_id") or "").strip()
     creator_model = preview_data.get("creator_model", "")
 
     if not creator_model:
@@ -1760,6 +1828,9 @@ async def approve_preview(request: Request, payload: dict = Body(...)) -> Stream
 
     async def preview_approve_stream():
         clear_run_cancelled(run_id)
+        install_succeeded = False
+        build_failed = False
+        fail_reason = ""
 
         def step(step_id: str, label: str, status: str, *, detail: str = ""):
             if not run_id:
@@ -1773,12 +1844,48 @@ async def approve_preview(request: Request, payload: dict = Body(...)) -> Stream
                 detail=detail,
             )
 
+        def emit(payload: dict) -> str:
+            nonlocal install_succeeded, build_failed, fail_reason
+            event = payload.get("ada_event")
+            if event == "tool_installed":
+                install_succeeded = True
+            elif event == "tool_build_failed":
+                build_failed = True
+                fail_reason = payload.get("reason", "Build failed.")
+            return sse_data(
+                _batch_tag_payload(
+                    payload,
+                    batch_id=batch_id,
+                    plan_id=plan_id,
+                    tool_name=tool_name,
+                )
+            )
+
         def phase(step_id: str, status: str, *, detail: str = ""):
+            if batch_id:
+                return emit(
+                    {
+                        "ada_event": "tool_build_phase",
+                        "run_id": run_id,
+                        "phase": step_id,
+                        "status": status,
+                        "detail": detail,
+                    }
+                )
             if not run_id:
                 return ""
             return tool_build_phase(run_id, step_id, status, detail=detail)
 
         def blog(message: str, *, level: str = "info"):
+            if batch_id:
+                return emit(
+                    {
+                        "ada_event": "tool_build_log",
+                        "run_id": run_id,
+                        "message": message,
+                        "level": level,
+                    }
+                )
             if not run_id:
                 return ""
             return tool_build_log(run_id, message, level=level)
@@ -1803,16 +1910,29 @@ async def approve_preview(request: Request, payload: dict = Body(...)) -> Stream
             step=step,
             phase=phase,
             blog=blog,
-            sse_data=sse_data,
+            sse_data=emit,
             cancelled=cancelled,
             reasoning_effort=reasoning_effort,
             preview_already_installed=bool(preview_data.get("preview_installed")),
+            install_lock=RUNTIME_INSTALL_LOCK if batch_id else None,
+            batch_id=batch_id or None,
         ):
             yield event
 
         PENDING_UI_PREVIEWS.pop(preview_id, None)
         if plan_id in PENDING_PLANS:
             del PENDING_PLANS[plan_id]
+
+        if batch_id:
+            if install_succeeded:
+                message = f"Tool '{tool_name}' installed in the persistent tool runtime."
+                mark_batch_tool_installed(batch_id, plan_id, tool_name, message)
+            elif build_failed:
+                mark_batch_tool_failed(batch_id, plan_id, tool_name, fail_reason)
+            complete = _maybe_emit_batch_complete(batch_id, run_id)
+            if complete:
+                yield complete
+
         clear_run_cancelled(run_id)
 
     return StreamingResponse(

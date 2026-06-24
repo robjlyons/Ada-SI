@@ -6,7 +6,7 @@ import { ReasoningBlock } from '../chat/ReasoningBlock'
 import { ToolBuildViewer } from './ToolBuildViewer'
 import { PipApprovalCard } from './PipApprovalCard'
 import { UiPreviewCard } from './UiPreviewCard'
-import { VIEWER_PHASES } from '../../constants'
+import { ForgePhaseStrip } from './ForgePhaseStrip'
 
 type ToolPlanCardProps = {
   feedId: string
@@ -100,19 +100,7 @@ export function ToolPlanCard({ feedId, card }: ToolPlanCardProps) {
           </span>
           <h3 className="tool-plan-title">{card.toolName}</h3>
         </div>
-        {isBuilding && (
-          <div className="tool-viewer-phases">
-            {VIEWER_PHASES.map((phase) => (
-              <span
-                key={phase.id}
-                className={`tool-viewer-phase step-${card.viewerPhases[phase.id] || 'pending'}`}
-                data-phase-id={phase.id}
-              >
-                {phase.label}
-              </span>
-            ))}
-          </div>
-        )}
+        {isBuilding && <ForgePhaseStrip viewerPhases={card.viewerPhases} />}
         {card.mode === 'success' && (
           <div className="skill-unlock-banner" aria-live="polite">
             <span className="skill-unlock-banner-icon" aria-hidden="true">

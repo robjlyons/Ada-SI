@@ -11,6 +11,7 @@ from prompts_config import (
     get_scout_orchestrator_prompt,
     get_tool_edit_existing_description,
     get_tool_generate_new_description,
+    get_tool_propose_batch_description,
 )
 from runtime_client import (
     diff_new_requirements,
@@ -596,6 +597,49 @@ def _summary_from_manifest(tool_name: str, description: str) -> dict:
     return summary
 
 
+def build_propose_tool_batch_schema() -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": "propose_tool_batch",
+            "description": get_tool_propose_batch_description(),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tools": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 10,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "tool_name": {
+                                    "type": "string",
+                                    "description": "Snake_case name for the new tool module.",
+                                },
+                                "description": {
+                                    "type": "string",
+                                    "description": (
+                                        "Detailed explanation of what the tool should do."
+                                    ),
+                                },
+                            },
+                            "required": ["tool_name", "description"],
+                        },
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": (
+                            "Short user-facing summary of the proposed multi-tool batch."
+                        ),
+                    },
+                },
+                "required": ["tools", "summary"],
+            },
+        },
+    }
+
+
 def build_generate_new_tool_schema() -> dict:
     return {
         "type": "function",
@@ -763,6 +807,7 @@ def _load_local_schemas() -> list[dict]:
 def load_dynamic_tools() -> list[dict]:
     tools = [
         build_generate_new_tool_schema(),
+        build_propose_tool_batch_schema(),
         build_edit_existing_tool_schema(),
         build_open_skill_app_schema(),
     ]
@@ -797,6 +842,7 @@ def load_dynamic_tools() -> list[dict]:
 async def aload_dynamic_tools() -> list[dict]:
     tools = [
         build_generate_new_tool_schema(),
+        build_propose_tool_batch_schema(),
         build_edit_existing_tool_schema(),
         build_open_skill_app_schema(),
     ]

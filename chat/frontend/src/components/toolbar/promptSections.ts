@@ -244,6 +244,7 @@ export const EMPTY_PROMPTS: PromptsConfig = {
   forge_fix_runtime_prompt: '',
   tool_generate_new_description: '',
   tool_edit_existing_description: '',
+  tool_propose_batch_description: '',
 }
 
 export function createEmptyEffectivePrompts(): EffectivePrompts {

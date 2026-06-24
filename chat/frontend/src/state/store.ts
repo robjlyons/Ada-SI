@@ -22,8 +22,14 @@ import type {
   ToolPlanCardState,
   ToolPlanFeedItem,
   ToolSummary,
+  ForgeBatchState,
+  ForgeBatchToolColumn,
+  ForgeBatchModalMode,
 } from '../types/events'
-import { createDefaultViewerPhases, createToolPlanCard } from '../types/events'
+import {
+  createDefaultViewerPhases,
+  createToolPlanCard,
+} from '../types/events'
 import { createFeedId } from '../utils/id'
 import {
   normalizeReasoningEffort,
@@ -111,6 +117,7 @@ type AppState = {
   lastXpGainAt: number | null
   abortController: AbortController | null
   runAbortControllers: Map<string, AbortController>
+  forgeBatch: ForgeBatchState | null
 
   setAppConfig: (config: AppConfig) => void
   setModels: (models: string[]) => void
@@ -185,6 +192,22 @@ type AppState = {
   appendViewerLog: (id: string, message: string, level?: 'info' | 'warn' | 'error') => void
   updateViewerPhase: (id: string, phaseId: string, status: PhaseStatus) => void
   showViewerSuccess: (id: string, message: string) => void
+
+  openForgeBatchProposal: (params: {
+    batchId: string
+    runId: string
+    summary: string
+    tools: Array<{ tool_name: string; description: string; plan_id: string }>
+  }) => void
+  setForgeBatchModalMode: (mode: ForgeBatchModalMode) => void
+  closeForgeBatch: () => void
+  initForgeBatchColumns: (tools: ForgeBatchToolColumn[]) => void
+  updateForgeBatchColumn: (
+    planId: string,
+    patch: Partial<ForgeBatchToolColumn>,
+  ) => void
+  findForgeBatchColumn: (planId: string) => ForgeBatchToolColumn | undefined
+  showForgeBatchColumnSuccess: (planId: string, message: string) => void
 }
 
 function loadStorage(key: string): string {
@@ -285,6 +308,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   lastXpGainAt: null,
   abortController: null,
   runAbortControllers: new Map(),
+  forgeBatch: null,
 
   setAppConfig: (config) => set({ appConfig: config }),
   setModels: (models) => set({ models }),
@@ -775,6 +799,79 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!current || current.card.mode !== 'success') return
       get().collapseToolPlan(id, message, 'Unlocked', 'success')
     }, 2800)
+  },
+
+  openForgeBatchProposal: ({ batchId, runId, summary, tools }) => {
+    set({
+      forgeBatch: {
+        batchId,
+        runId,
+        summary,
+        modalMode: 'confirming',
+        proposedTools: tools,
+        tools: [],
+      },
+    })
+  },
+
+  setForgeBatchModalMode: (mode) => {
+    const batch = get().forgeBatch
+    if (!batch) return
+    set({ forgeBatch: { ...batch, modalMode: mode } })
+  },
+
+  closeForgeBatch: () => set({ forgeBatch: null }),
+
+  initForgeBatchColumns: (tools) => {
+    const batch = get().forgeBatch
+    if (!batch) return
+    set({
+      forgeBatch: {
+        ...batch,
+        tools,
+        modalMode: 'expanded',
+      },
+    })
+  },
+
+  updateForgeBatchColumn: (planId, patch) => {
+    const batch = get().forgeBatch
+    if (!batch) return
+    set({
+      forgeBatch: {
+        ...batch,
+        tools: batch.tools.map((col) =>
+          col.planId === planId ? { ...col, ...patch } : col,
+        ),
+      },
+    })
+  },
+
+  findForgeBatchColumn: (planId) => {
+    return get().forgeBatch?.tools.find((col) => col.planId === planId)
+  },
+
+  showForgeBatchColumnSuccess: (planId, message) => {
+    const col = get().findForgeBatchColumn(planId)
+    if (!col) return
+    const xpResult = get().grantXp('skill')
+    get().updateForgeBatchColumn(planId, {
+      status: 'done',
+      lastSuccessMessage: message,
+      busy: false,
+      viewerPhases: Object.fromEntries(
+        VIEWER_PHASES.map((p) => [p.id, 'done' as PhaseStatus]),
+      ),
+      viewerOutput: [...col.viewerOutput, message],
+    })
+    set((state) => ({
+      celebrations: [
+        ...state.celebrations,
+        createSkillCelebration(col.toolName, xpResult.progression, xpResult.xpGained),
+      ],
+      recentlyUnlockedTool: col.toolName,
+      activeSidePanelTab: 'tools',
+    }))
   },
 }))
 

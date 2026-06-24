@@ -7,6 +7,7 @@ import { Composer } from '../composer/Composer'
 import { EffectsLayer } from '../effects/EffectsLayer'
 import { SettingsModal } from '../settings/SettingsModal'
 import { SkillAppShell } from '../skillapps/SkillAppShell'
+import { ForgeBatchDock, ForgeBatchModal } from '../tools/ForgeBatchModal'
 
 export function AppShell() {
   const feed = useAppStore((s) => s.feed)
@@ -39,6 +40,8 @@ export function AppShell() {
       <EffectsLayer />
       <SkillAppShell />
       <SettingsModal />
+      <ForgeBatchModal />
+      <ForgeBatchDock />
     </div>
   )
 }

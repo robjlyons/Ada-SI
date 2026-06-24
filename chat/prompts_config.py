@@ -13,17 +13,18 @@ from forge_routing import ForgeCodegenProfile, ForgeReviseProfile, infer_codegen
 _DEFAULT_SCOUT_ORCHESTRATOR_PREFIX = """You are Ada-SI, a self-improving agent that extends itself by creating Python tools.
 
 Routing rules (follow strictly):
-1. If the user needs live or external data you cannot access directly — weather, stock prices, news, web lookups, account/system state, file I/O, scheduled jobs, TTS/audio (gTTS, pyttsx3, local speech synthesis, audio file output), or any API — call generate_new_tool. Do NOT reply with "I can't" or ask clarifying questions instead of calling the tool; put requirements (APIs, inputs, outputs) in the tool description.
-2. If the user wants a persistent app-like capability (calendar, todos, notes, tracker, journal, file browser, or custom layout) that they can open as a popup mini-app, call generate_new_tool and describe it as an INTERACTIVE skill. Use calendar, list, or table templates when they fit; use custom template for unique UIs (file manager, dashboards, multi-panel layouts).
-3. If an installed tool matches the request, call that tool first. Pass whatever arguments you have; the tool may return follow-up questions.
-4. If the user asks to see, view, open, or show an installed interactive skill app, call open_skill_app with the skill name.
-5. If the user asks to fix, change, or improve an existing installed tool, call edit_existing_tool with the tool name and a detailed description of the changes.
-6. Reply in plain text only for general conversation, explanations, or static knowledge that needs no live data and no custom code.
+1. If the user needs live or external data you cannot access directly — weather, stock prices, news, web lookups, account/system state, file I/O, scheduled jobs, TTS/audio (gTTS, pyttsx3, local speech synthesis, audio file output), or any API — call generate_new_tool for a SINGLE tool, or propose_tool_batch when the user needs 2–10 independent tools at once. Do NOT reply with "I can't" or ask clarifying questions instead of calling the tool; put requirements (APIs, inputs, outputs) in the tool description.
+2. If the user wants a persistent app-like capability (calendar, todos, notes, tracker, journal, file browser, or custom layout) that they can open as a popup mini-app, call generate_new_tool and describe it as an INTERACTIVE skill — one skill per app. Use calendar, list, or table templates when they fit; use custom template for unique UIs (file manager, dashboards, multi-panel layouts). Do NOT batch multiple apps; use one interactive skill with multiple actions instead.
+3. If the user needs 2–10 separate independent capabilities (e.g. weather tool AND stock tool), call propose_tool_batch with each tool listed — not multiple generate_new_tool calls.
+4. If an installed tool matches the request, call that tool first. Pass whatever arguments you have; the tool may return follow-up questions.
+5. If the user asks to see, view, open, or show an installed interactive skill app, call open_skill_app with the skill name.
+6. If the user asks to fix, change, or improve an existing installed tool, call edit_existing_tool with the tool name and a detailed description of the changes.
+7. Reply in plain text only for general conversation, explanations, or static knowledge that needs no live data and no custom code.
 """
 
 _DEFAULT_SCOUT_ORCHESTRATOR_SUFFIX = """
 
-When calling generate_new_tool or edit_existing_tool, use snake_case tool_name and a detailed description the tool creator can implement without further user input when possible."""
+When calling generate_new_tool, propose_tool_batch, or edit_existing_tool, use snake_case tool_name and a detailed description the tool creator can implement without further user input when possible."""
 
 _DEFAULT_SCOUT_ADDITIONAL_DIRECTIVES = ""
 
@@ -441,6 +442,14 @@ _DEFAULT_TOOL_EDIT_EXISTING_DESCRIPTION = (
     "changes — not for creating a brand-new capability under a new name."
 )
 
+_DEFAULT_TOOL_PROPOSE_BATCH_DESCRIPTION = (
+    "Propose creating 2–10 new independent Python tools at once when the user needs "
+    "multiple separate capabilities (e.g. weather lookup AND stock prices). The user "
+    "will confirm before any forging begins. Do not use for a single tool (use "
+    "generate_new_tool), a single app with multiple features (use one interactive "
+    "generate_new_tool), or editing existing tools."
+)
+
 PROMPT_KEYS = (
     "scout_orchestrator_prefix",
     "scout_orchestrator_suffix",
@@ -465,12 +474,13 @@ PROMPT_KEYS = (
     "forge_fix_runtime_prompt",
     "tool_generate_new_description",
     "tool_edit_existing_description",
+    "tool_propose_batch_description",
 )
 
 CONFIG_DIR = Path(__file__).parent / "staging"
 CONFIG_PATH = CONFIG_DIR / "prompts_config.json"
 LEGACY_GUIDANCE_PATH = CONFIG_DIR / "forger_guidance.json"
-PROMPTS_DEFAULTS_REVISION = 6
+PROMPTS_DEFAULTS_REVISION = 7
 CONFIG_REVISION_KEY = "_defaults_revision"
 
 
@@ -498,6 +508,7 @@ class PromptsConfig(TypedDict):
     forge_fix_runtime_prompt: str
     tool_generate_new_description: str
     tool_edit_existing_description: str
+    tool_propose_batch_description: str
 
 
 class EffectivePrompts(TypedDict):
@@ -622,6 +633,7 @@ def default_prompts_config() -> PromptsConfig:
         "forge_fix_runtime_prompt": _DEFAULT_FORGE_FIX_RUNTIME_PROMPT,
         "tool_generate_new_description": _DEFAULT_TOOL_GENERATE_NEW_DESCRIPTION,
         "tool_edit_existing_description": _DEFAULT_TOOL_EDIT_EXISTING_DESCRIPTION,
+        "tool_propose_batch_description": _DEFAULT_TOOL_PROPOSE_BATCH_DESCRIPTION,
     }
 
 
@@ -780,6 +792,10 @@ def get_tool_generate_new_description() -> str:
 
 def get_tool_edit_existing_description() -> str:
     return load_prompts_config()["tool_edit_existing_description"]
+
+
+def get_tool_propose_batch_description() -> str:
+    return load_prompts_config()["tool_propose_batch_description"]
 
 
 def build_effective_prompts() -> EffectivePrompts:
