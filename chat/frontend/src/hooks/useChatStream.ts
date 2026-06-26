@@ -6,10 +6,16 @@ import {
   isAdaEvent,
   type AdaEvent,
 } from '../types/events'
+import { syncScoutDisplayName } from '../lib/syncScoutDisplayName'
 import { buildMessages, useAppStore } from '../state/store'
+import { resolveTtsVoiceId } from '../utils/ttsVoice'
+import { extractCompletedSentences, extractTrailingSentence } from '../utils/sentenceSplit'
+import { useTtsPlayback } from './useTtsPlayback'
+import type { TtsSentenceQueue } from '../lib/ttsPlayback'
 
 export function useChatStream() {
   const store = useAppStore()
+  const { createQueue, stopPlayback } = useTtsPlayback()
 
   const handleAdaEvent = useCallback((json: AdaEvent): boolean => {
     if (json.ada_event === 'process_step') {
@@ -31,6 +37,17 @@ export function useChatStream() {
     }
     if (json.ada_event === 'skill_data_changed') {
       store.bumpSkillDataRevision()
+      return true
+    }
+    if (json.ada_event === 'persona_updated') {
+      if (json.display_name) {
+        store.setScoutDisplayName(json.display_name)
+      } else {
+        void syncScoutDisplayName()
+      }
+      if (json.tool === 'bootstrap_complete') {
+        store.setPersonaBootstrapActive(false)
+      }
       return true
     }
     return false
@@ -143,7 +160,7 @@ export function useChatStream() {
   )
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (content: string, options?: { bootstrapOpening?: boolean }) => {
       if (store.isSending) return
 
       const model = store.chatModel
@@ -152,22 +169,38 @@ export function useChatStream() {
         return
       }
 
+      const bootstrapOpening = options?.bootstrapOpening === true
+      const trimmed = content.trim()
+      if (!bootstrapOpening && !trimmed) return
+
       const controller = new AbortController()
       store.setAbortController(controller)
 
-      const runId = store.startProcessRun(content, model)
+      const runLabel = bootstrapOpening ? 'Bootstrap ritual' : trimmed
+      const runId = store.startProcessRun(runLabel, model)
       const runControllers = new Map(store.runAbortControllers)
       runControllers.set(runId, controller)
       useAppStore.setState({ runAbortControllers: runControllers })
 
       store.setIsSending(true)
       store.setStatus('')
-      store.pushConversation({ role: 'user', content })
-      store.addUserMessage(content)
+      stopPlayback()
+      if (!bootstrapOpening) {
+        store.pushConversation({ role: 'user', content: trimmed })
+        store.addUserMessage(trimmed)
+      }
 
       const assistantId = store.addAssistantMessage()
       let planReceived = false
       let batchReceived = false
+      let ttsBuffer = ''
+      let ttsCursor = 0
+      let ttsQueue: TtsSentenceQueue | null = null
+      if (store.ttsEnabled) {
+        ttsQueue = createQueue(resolveTtsVoiceId(store.ttsVoiceId), (ttsError) => {
+          store.setStatus(`Voice playback failed: ${ttsError.message}`, true)
+        })
+      }
 
       try {
         await consumeSseStream({
@@ -177,9 +210,11 @@ export function useChatStream() {
             tool_creator_model: store.toolCreatorModel,
             reasoning_effort: store.thinkingEffort,
             gemini_google_search: store.geminiGoogleSearch,
+            tts_enabled: store.ttsEnabled,
             messages: buildMessages(),
             run_id: runId,
             stream: true,
+            bootstrap_opening: bootstrapOpening,
           },
           signal: controller.signal,
           onPayload: (json) => {
@@ -189,6 +224,7 @@ export function useChatStream() {
                 throw new Error(json.detail || 'Chat failed.')
               }
               if (json.ada_event === 'tool_plan_draft_started') {
+                stopPlayback()
                 store.removeFeedItem(assistantId)
                 handlePlanDraftStarted(json)
                 return
@@ -203,11 +239,13 @@ export function useChatStream() {
               }
               if (json.ada_event === 'tool_plan_pending') {
                 planReceived = true
+                stopPlayback()
                 handlePlanPending(json, assistantId)
                 return
               }
               if (json.ada_event === 'forge_batch_proposed') {
                 batchReceived = true
+                stopPlayback()
                 handleForgeBatchProposed(json, assistantId)
                 return
               }
@@ -234,6 +272,15 @@ export function useChatStream() {
               reasoningText: current.reasoningText + reasoning,
               content: current.content + text,
             })
+
+            if (ttsQueue && text) {
+              ttsBuffer += text
+              const { sentences, cursor } = extractCompletedSentences(ttsBuffer, ttsCursor)
+              ttsCursor = cursor
+              for (const sentence of sentences) {
+                ttsQueue.enqueue(sentence)
+              }
+            }
           },
         })
 
@@ -260,8 +307,14 @@ export function useChatStream() {
             })
             if (finalContent) {
               store.pushConversation({ role: 'assistant', content: finalContent })
-              if (finalContent !== '(No response)') {
+              if (finalContent !== '(No response)' && !bootstrapOpening) {
                 store.grantXp('chat')
+                if (ttsQueue) {
+                  const tail = extractTrailingSentence(ttsBuffer, ttsCursor)
+                  if (tail) {
+                    ttsQueue.flush(tail)
+                  }
+                }
               }
             }
           }
@@ -288,12 +341,16 @@ export function useChatStream() {
             store.setStatus('Response halted.')
           } else {
             store.removeFeedItem(assistantId)
-            store.popConversation()
+            if (!bootstrapOpening) {
+              store.popConversation()
+            }
             store.setStatus('Response halted.')
           }
         } else {
           store.removeFeedItem(assistantId)
-          store.popConversation()
+          if (!bootstrapOpening) {
+            store.popConversation()
+          }
           store.setStatus(`Chat failed: ${err.message}`, true)
         }
       } finally {
@@ -310,10 +367,17 @@ export function useChatStream() {
       handlePlanContentDelta,
       handlePlanPending,
       handleForgeBatchProposed,
+      createQueue,
+      stopPlayback,
     ],
   )
 
+  const sendBootstrapOpening = useCallback(async () => {
+    await sendMessage('', { bootstrapOpening: true })
+  }, [sendMessage])
+
   const stopGeneration = useCallback(() => {
+    stopPlayback()
     const { activeRunId, abortController, runAbortControllers } = useAppStore.getState()
     if (activeRunId) {
       runAbortControllers.get(activeRunId)?.abort()
@@ -328,7 +392,7 @@ export function useChatStream() {
       return
     }
     abortController?.abort()
-  }, [store])
+  }, [store, stopPlayback])
 
-  return { sendMessage, stopGeneration }
+  return { sendMessage, sendBootstrapOpening, stopGeneration }
 }

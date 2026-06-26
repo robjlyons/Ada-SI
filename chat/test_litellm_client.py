@@ -34,6 +34,44 @@ class LiteLLMClientTests(unittest.TestCase):
         self.assertNotIn("googleSearch", str(payload.get("tools", [])))
         self.assertNotIn("include_server_side_tool_invocations", payload)
 
+    def test_gemini_strips_additional_properties_from_tool_schemas(self) -> None:
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "example_tool",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "action": {"type": "string"},
+                            "title": {"type": "string"},
+                            "metadata": {
+                                "type": "object",
+                                "additionalProperties": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+            }
+        ]
+        payload = build_completion_payload(
+            "gemini/gemini-2.0-flash",
+            [{"role": "user", "content": "hi"}],
+            stream=True,
+            tools=tools,
+        )
+        self.assertNotIn("additionalProperties", str(payload["tools"]))
+        metadata = payload["tools"][0]["function"]["parameters"]["properties"]["metadata"]
+        self.assertEqual(metadata, {"type": "object"})
+
+        openai_payload = build_completion_payload(
+            "openai/gpt-4o",
+            [{"role": "user", "content": "hi"}],
+            stream=True,
+            tools=tools,
+        )
+        self.assertIn("additionalProperties", str(openai_payload["tools"]))
+
     def test_extract_grounding_sources(self) -> None:
         chunk = {
             "vertex_ai_grounding_metadata": [

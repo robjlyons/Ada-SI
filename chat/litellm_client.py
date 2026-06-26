@@ -11,6 +11,60 @@ SSE_HEADERS = {
     "X-Accel-Buffering": "no",
 }
 
+# Vertex AI / Gemini function_declarations reject several JSON Schema keywords.
+_VERTEX_UNSUPPORTED_SCHEMA_KEYS = frozenset({
+    "additionalProperties",
+    "$schema",
+    "$ref",
+    "$defs",
+    "definitions",
+    "patternProperties",
+    "unevaluatedProperties",
+    "const",
+    "examples",
+    "default",
+    "minLength",
+    "maxLength",
+    "minimum",
+    "maximum",
+    "minItems",
+    "maxItems",
+    "multipleOf",
+    "pattern",
+    "format",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "minProperties",
+    "maxProperties",
+})
+
+
+def sanitize_json_schema_for_vertex(value: Any) -> Any:
+    """Recursively strip JSON Schema keys Vertex Gemini tool calling rejects."""
+    if isinstance(value, dict):
+        return {
+            key: sanitize_json_schema_for_vertex(item)
+            for key, item in value.items()
+            if key not in _VERTEX_UNSUPPORTED_SCHEMA_KEYS
+        }
+    if isinstance(value, list):
+        return [sanitize_json_schema_for_vertex(item) for item in value]
+    return value
+
+
+def sanitize_tools_for_model(tools: list[dict] | None, model: str) -> list[dict] | None:
+    if tools is None or not is_gemini_model(model):
+        return tools
+    sanitized: list[dict] = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        if "googleSearch" in tool or "google_search" in tool:
+            sanitized.append(tool)
+            continue
+        sanitized.append(sanitize_json_schema_for_vertex(tool))
+    return sanitized
+
 
 def is_gemini_model(model: str) -> bool:
     return model.startswith("gemini/") or model.startswith("gemini/*")
@@ -129,6 +183,7 @@ def build_completion_payload(
         ):
             effective_tools.append({"googleSearch": {}})
         payload["include_server_side_tool_invocations"] = True
+    effective_tools = sanitize_tools_for_model(effective_tools, model)
     if effective_tools is not None:
         payload["tools"] = effective_tools
         payload["tool_choice"] = "auto"

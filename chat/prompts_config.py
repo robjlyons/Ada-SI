@@ -8,23 +8,21 @@ from typing import TypedDict
 
 from forge_routing import ForgeCodegenProfile, ForgeReviseProfile, infer_codegen_profile, infer_revise_profile
 
-# --- Scout agent defaults ---
+# --- Scout agent defaults (routing stub only; personality lives in persona files) ---
 
-_DEFAULT_SCOUT_ORCHESTRATOR_PREFIX = """You are Ada-SI, a self-improving agent that extends itself by creating Python tools.
-
-Routing rules (follow strictly):
-1. If the user needs live or external data you cannot access directly — weather, stock prices, news, web lookups, account/system state, file I/O, scheduled jobs, TTS/audio (gTTS, pyttsx3, local speech synthesis, audio file output), or any API — call generate_new_tool for a SINGLE tool, or propose_tool_batch when the user needs 2–10 independent tools at once. Do NOT reply with "I can't" or ask clarifying questions instead of calling the tool; put requirements (APIs, inputs, outputs) in the tool description.
-2. If the user wants a persistent app-like capability (calendar, todos, notes, tracker, journal, file browser, stopwatch, counter, timer, game, or custom layout) that they can open as a popup mini-app, call generate_new_tool and describe it as an INTERACTIVE skill — one skill per app. Always use template: custom with HTML/CSS/JS ui_files. Define operations freely (any names) and map UI intents to operations in manifest.ui.actions (any key names, e.g. start, pause, reset or fetch, create, delete). Do NOT batch multiple apps; use one interactive skill with multiple actions instead.
-3. If the user needs 2–10 separate independent capabilities (e.g. weather tool AND stock tool), call propose_tool_batch with each tool listed — not multiple generate_new_tool calls.
-4. If an installed tool matches the request, call that tool first. Pass whatever arguments you have; the tool may return follow-up questions.
-5. If the user asks to see, view, open, or show an installed interactive skill app, call open_skill_app with the skill name.
-6. If the user asks to fix, change, or improve an existing installed tool, call edit_existing_tool with the tool name and a detailed description of the changes.
-7. Reply in plain text only for general conversation, explanations, or static knowledge that needs no live data and no custom code.
+_DEFAULT_SCOUT_ORCHESTRATOR_PREFIX = """Scout routing rules (follow strictly):
+1. Live/external data, APIs, file I/O, TTS/audio, or anything requiring code → generate_new_tool or propose_tool_batch. Do NOT reply with "I can't" — put requirements in the tool description.
+2. Persistent app-like capability (calendar, todos, timer, etc.) → generate_new_tool as INTERACTIVE skill (custom HTML/CSS/JS ui_files). One skill per app; do NOT batch multiple apps.
+3. 2–10 independent capabilities → propose_tool_batch (not multiple generate_new_tool calls).
+4. Installed tool matches → call it first.
+5. User asks to open/show an interactive skill → open_skill_app.
+6. User asks to fix/improve a skill → edit_existing_tool.
+7. General conversation with no live data/code → plain text reply only.
 """
 
 _DEFAULT_SCOUT_ORCHESTRATOR_SUFFIX = """
 
-When calling generate_new_tool, propose_tool_batch, or edit_existing_tool, use snake_case tool_name and a detailed description the tool creator can implement without further user input when possible."""
+When calling generate_new_tool, propose_tool_batch, or edit_existing_tool: snake_case tool_name and a detailed description the tool creator can implement without further user input when possible."""
 
 _DEFAULT_SCOUT_ADDITIONAL_DIRECTIVES = ""
 
@@ -504,7 +502,7 @@ PROMPT_KEYS = (
 CONFIG_DIR = Path(__file__).parent / "staging"
 CONFIG_PATH = CONFIG_DIR / "prompts_config.json"
 LEGACY_GUIDANCE_PATH = CONFIG_DIR / "forger_guidance.json"
-PROMPTS_DEFAULTS_REVISION = 7
+PROMPTS_DEFAULTS_REVISION = 8
 CONFIG_REVISION_KEY = "_defaults_revision"
 
 
@@ -537,6 +535,7 @@ class PromptsConfig(TypedDict):
 
 class EffectivePrompts(TypedDict):
     scout_orchestrator: str
+    scout_composed_system: str
     forge_plan: str
     forge_revise_plan: str
     forge_edit_plan: str
@@ -612,6 +611,13 @@ def _apply_stale_prompt_replacements(config: PromptsConfig) -> tuple[PromptsConf
     )
     updated = dict(config)
     changed = False
+    for key in PROMPT_KEYS:
+        value = updated.get(key, "")
+        if not isinstance(value, str):
+            continue
+        if "Ada-SI" in value:
+            updated[key] = value.replace("Ada-SI", "Ada")
+            changed = True
     for key in PROMPT_KEYS:
         value = updated.get(key, "")
         if not isinstance(value, str):
@@ -752,18 +758,26 @@ def _with_forge_appendix(base: str) -> str:
     return f"{base}\n\n{appendix}"
 
 
-def get_scout_orchestrator_prompt(*, extra_directives: str | None = None) -> str:
+def get_scout_routing_prompt() -> str:
+    """Minimal tool-routing stub for Scout (personality is in persona markdown files)."""
     config = load_prompts_config()
     parts = [
         config["scout_orchestrator_prefix"].strip(),
         config["scout_orchestrator_suffix"].strip(),
     ]
-    system = "".join(part for part in parts if part)
+    return "".join(part for part in parts if part)
 
-    directives = (extra_directives if extra_directives is not None else config["scout_additional_directives"]).strip()
+
+def get_scout_orchestrator_prompt(*, extra_directives: str | None = None) -> str:
+    """Backward-compatible alias for routing-only prompt."""
+    routing = get_scout_routing_prompt()
+    config = load_prompts_config()
+    directives = (
+        extra_directives if extra_directives is not None else config["scout_additional_directives"]
+    ).strip()
     if directives:
-        system += f"\n\nAdditional user instructions:\n{directives}"
-    return system
+        return routing + f"\n\nAdditional user instructions:\n{directives}"
+    return routing
 
 
 def get_forge_plan_prompt() -> str:
@@ -834,9 +848,12 @@ def get_tool_propose_batch_description() -> str:
 
 
 def build_effective_prompts() -> EffectivePrompts:
+    from scout_persona import build_scout_system_instruction
+
     config = load_prompts_config()
     return {
-        "scout_orchestrator": get_scout_orchestrator_prompt(),
+        "scout_orchestrator": get_scout_routing_prompt(),
+        "scout_composed_system": build_scout_system_instruction(get_scout_routing_prompt()),
         "forge_plan": get_forge_plan_prompt(),
         "forge_revise_plan": get_forge_revise_plan_prompt(),
         "forge_edit_plan": get_forge_edit_plan_prompt(),

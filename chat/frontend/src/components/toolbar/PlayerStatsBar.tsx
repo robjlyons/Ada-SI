@@ -6,6 +6,7 @@ import { useVisualizerActivity } from '../visualizer/useVisualizerActivity'
 
 export function PlayerStatsBar() {
   const playerProgress = useAppStore((s) => s.playerProgress)
+  const scoutDisplayName = useAppStore((s) => s.scoutDisplayName)
   const lastXpGainAt = useAppStore((s) => s.lastXpGainAt)
   const tools = useAppStore((s) => s.tools)
   const activity = useVisualizerActivity()
@@ -31,7 +32,7 @@ export function PlayerStatsBar() {
       <div className="player-stats-body">
         <div className="player-stats-top">
           <div className="player-stats-identity">
-            <span className="player-stats-name">ADA</span>
+            <span className="player-stats-name">{scoutDisplayName}</span>
             <span className="player-stats-subtitle">{progression.rankTitle}</span>
           </div>
 

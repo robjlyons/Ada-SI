@@ -18,28 +18,22 @@ export type PromptGroup = {
 export const PROMPT_GROUPS: PromptGroup[] = [
   {
     id: 'scout',
-    title: 'Scout agent',
-    description: 'System prompt and tool routing for the chat orchestrator model.',
+    title: 'Scout routing',
+    description:
+      'Minimal tool-routing stub for Scout. Personality, identity, and memory live in Persona settings.',
     sections: [
       {
         key: 'scout_orchestrator_prefix',
-        label: 'Orchestrator intro & rules 1–6',
-        hint: 'Opening identity and core routing rules sent to the Scout agent.',
+        label: 'Routing rules 1–7',
+        hint: 'Core tool-routing rules injected before persona files.',
         rows: 7,
         effectiveKey: 'scout_orchestrator',
       },
       {
         key: 'scout_orchestrator_suffix',
-        label: 'Orchestrator closing rule',
-        hint: 'Tool naming and description requirements after routing rules.',
+        label: 'Tool naming rule',
+        hint: 'snake_case tool_name and description requirements for forge handoff.',
         rows: 2,
-        effectiveKey: 'scout_orchestrator',
-      },
-      {
-        key: 'scout_additional_directives',
-        label: 'Additional directives',
-        hint: 'Optional extra instructions appended to the Scout system prompt.',
-        rows: 3,
         effectiveKey: 'scout_orchestrator',
       },
       {
@@ -250,6 +244,7 @@ export const EMPTY_PROMPTS: PromptsConfig = {
 export function createEmptyEffectivePrompts(): EffectivePrompts {
   return {
     scout_orchestrator: '',
+    scout_composed_system: '',
     forge_plan: '',
     forge_revise_plan: '',
     forge_edit_plan: '',

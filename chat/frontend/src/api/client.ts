@@ -1,11 +1,17 @@
 import type {
   AppConfig,
   ModelsResponse,
+  PersonaConfig,
+  PersonaFileKey,
+  PersonaResponse,
   PipPackage,
   PromptsConfig,
   PromptsResponse,
+  SecretKey,
+  SecretsStatusMap,
   SkillDataDocument,
   ToolSummary,
+  TtsVoice,
 } from '../types/events'
 import { parseErrorMessage } from '../utils/text'
 
@@ -49,6 +55,75 @@ export async function fetchModels(): Promise<string[]> {
 export async function fetchTools(): Promise<ToolSummary[]> {
   const data = await requestJson<{ tools: ToolSummary[] }>('/api/tools')
   return data.tools || []
+}
+
+export async function fetchSecrets(): Promise<SecretsStatusMap> {
+  const data = await requestJson<{ secrets: SecretsStatusMap }>('/api/secrets')
+  return data.secrets || {}
+}
+
+export async function saveSecrets(
+  secrets: Partial<Record<SecretKey, string>>,
+): Promise<SecretsStatusMap> {
+  const data = await requestJson<{ secrets: SecretsStatusMap }>('/api/secrets', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ secrets }),
+  })
+  return data.secrets || {}
+}
+
+export async function clearSecret(key: SecretKey): Promise<SecretsStatusMap> {
+  const data = await requestJson<{ secrets: SecretsStatusMap }>(
+    `/api/secrets/${encodeURIComponent(key)}`,
+    { method: 'DELETE' },
+  )
+  return data.secrets || {}
+}
+
+export async function fetchTtsVoices(): Promise<TtsVoice[]> {
+  const data = await requestJson<{ voices: TtsVoice[] }>('/api/tts/voices')
+  return data.voices || []
+}
+
+export async function synthesizeSpeech(text: string, voiceId?: string): Promise<Blob> {
+  const response = await fetch('/api/tts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, voice_id: voiceId || undefined }),
+  })
+  if (!response.ok) {
+    throw new Error(parseErrorMessage(await response.text()))
+  }
+  return response.blob()
+}
+
+export async function synthesizeSpeechStream(
+  text: string,
+  voiceId?: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const response = await fetch('/api/tts/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, voice_id: voiceId || undefined }),
+    signal,
+  })
+  if (!response.ok) {
+    throw new Error(parseErrorMessage(await response.text()))
+  }
+  if (!response.body) {
+    return response.blob()
+  }
+
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    if (value) chunks.push(value)
+  }
+  return new Blob(chunks as BlobPart[], { type: 'audio/mpeg' })
 }
 
 export async function fetchSkillData(skillName: string): Promise<SkillDataDocument> {
@@ -154,5 +229,36 @@ export async function rejectForgeBatchPlan(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ batch_id: batchId, plan_id: planId }),
+  })
+}
+
+export async function fetchPersona(): Promise<PersonaResponse> {
+  return requestJson<PersonaResponse>('/api/persona')
+}
+
+export async function savePersonaFile(
+  file: PersonaFileKey,
+  content: string,
+): Promise<PersonaResponse> {
+  return requestJson<PersonaResponse>('/api/persona', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file, content }),
+  })
+}
+
+export async function resetPersona(): Promise<PersonaResponse> {
+  return requestJson<PersonaResponse>('/api/persona/reset', { method: 'POST' })
+}
+
+export async function startPersonaBootstrap(): Promise<PersonaResponse> {
+  return requestJson<PersonaResponse>('/api/persona/bootstrap', { method: 'POST' })
+}
+
+export async function savePersonaConfig(config: Partial<PersonaConfig>): Promise<PersonaResponse> {
+  return requestJson<PersonaResponse>('/api/persona/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
   })
 }

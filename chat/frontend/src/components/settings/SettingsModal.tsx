@@ -1,11 +1,13 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useEffect, useState } from 'react'
 import { useAppStore } from '../../state/store'
+import type { SettingsSection } from '../../constants'
 import { AgentsSettings } from './AgentsSettings'
+import { ApiKeysSettings } from './ApiKeysSettings'
+import { PersonaSettings } from './PersonaSettings'
 import { ProgressSettings } from './ProgressSettings'
 import { PromptsEditor } from './PromptsEditor'
-
-type SettingsSection = 'agents' | 'prompts' | 'progress'
+import { VoiceSettings } from './VoiceSettings'
 
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description: string }> = [
   {
@@ -14,9 +16,24 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description
     description: 'Scout, Forge master & analysis depth',
   },
   {
+    id: 'api-keys',
+    label: 'API keys',
+    description: 'LLM providers & ElevenLabs',
+  },
+  {
+    id: 'voice',
+    label: 'Voice',
+    description: 'Read-aloud output',
+  },
+  {
+    id: 'persona',
+    label: 'Persona',
+    description: 'Scout identity, soul & memory',
+  },
+  {
     id: 'prompts',
     label: 'Model prompts',
-    description: 'Scout agent & Forge master instructions',
+    description: 'Scout routing stub & Forge master',
   },
   {
     id: 'progress',
@@ -27,8 +44,15 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description
 
 export function SettingsModal() {
   const settingsOpen = useAppStore((s) => s.settingsOpen)
+  const settingsSection = useAppStore((s) => s.settingsSection)
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen)
-  const [activeSection, setActiveSection] = useState<SettingsSection>('agents')
+  const [activeSection, setActiveSection] = useState<SettingsSection>(settingsSection)
+
+  useEffect(() => {
+    if (settingsOpen) {
+      setActiveSection(settingsSection)
+    }
+  }, [settingsOpen, settingsSection])
 
   useEffect(() => {
     if (!settingsOpen) return
@@ -104,6 +128,9 @@ export function SettingsModal() {
 
               <div className="settings-content scroll-area">
                 {activeSection === 'agents' ? <AgentsSettings /> : null}
+                {activeSection === 'api-keys' ? <ApiKeysSettings /> : null}
+                {activeSection === 'voice' ? <VoiceSettings /> : null}
+                {activeSection === 'persona' ? <PersonaSettings /> : null}
                 {activeSection === 'prompts' ? <PromptsEditor /> : null}
                 {activeSection === 'progress' ? <ProgressSettings /> : null}
               </div>

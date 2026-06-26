@@ -8,11 +8,12 @@ import types
 from pathlib import Path
 
 from prompts_config import (
-    get_scout_orchestrator_prompt,
+    get_scout_routing_prompt,
     get_tool_edit_existing_description,
     get_tool_generate_new_description,
     get_tool_propose_batch_description,
 )
+from scout_persona import PERSONA_TOOL_DECLARATIONS, build_scout_system_instruction
 from runtime_client import (
     diff_new_requirements,
     fetch_runtime_manifest,
@@ -454,20 +455,102 @@ def _verify_crud_contract(
     return True, "API contract tests passed."
 
 
-def _verify_freeform_contract(mod, actions: dict) -> tuple[bool, str]:
-    minimal = _contract_minimal_params(mod)
+def _operation_category(op: str) -> str:
+    lowered = op.lower()
+    if any(needle in lowered for needle in ("list_", "fetch", "get_state")) or (
+        lowered.startswith("get_") and "delete" not in lowered
+    ):
+        return "read"
+    if any(needle in lowered for needle in ("add_", "create_", "insert_")):
+        return "create"
+    if any(needle in lowered for needle in ("delete_", "remove_")):
+        return "delete"
+    if any(needle in lowered for needle in ("complete_", "toggle_", "update_")):
+        return "update"
+    if any(needle in lowered for needle in ("start", "stop", "pause", "reset")):
+        return "control"
+    return "generic"
+
+
+def _sort_operations_for_contract(operations: list[str]) -> list[str]:
+    order = {"read": 0, "control": 1, "create": 2, "update": 3, "delete": 4, "generic": 5}
+    unique = []
     seen: set[str] = set()
-    for action_name in actions.values():
-        op = str(action_name).strip()
-        if not op or op in seen:
+    for op in operations:
+        name = str(op).strip()
+        if not name or name in seen:
             continue
-        seen.add(op)
-        params = {"action": op, **minimal}
-        result = mod.run(**params)
+        seen.add(name)
+        unique.append(name)
+    return sorted(unique, key=lambda op: (order.get(_operation_category(op), 99), op))
+
+
+def _contract_params_for_operation(
+    mod,
+    manifest: dict,
+    op: str,
+    category: str,
+    created_id: str | None,
+) -> dict[str, str]:
+    props = _tool_schema_properties(mod)
+    if category == "create":
+        return _contract_create_params(mod, manifest)
+    if category in ("update", "delete"):
+        if not created_id:
+            return {}
+        id_key = _delete_id_param(mod, op, manifest.get("operations") or [], "custom")
+        if id_key in props:
+            return {id_key: created_id}
+        return {}
+    if category in ("read", "control"):
+        return {}
+    params: dict[str, str] = {}
+    for key in props:
+        if key in ("action",) or key.endswith("_id"):
+            continue
+        params[key] = _sample_value_for_field(key)
+    return params
+
+
+def _extract_created_id(result, data_path: Path) -> str | None:
+    if isinstance(result, dict):
+        record_id = result.get("id")
+        if record_id:
+            return str(record_id)
+    if data_path.exists():
+        try:
+            data = json.loads(data_path.read_text(encoding="utf-8"))
+            records = data.get("records", [])
+            if records:
+                last = records[-1]
+                if isinstance(last, dict) and last.get("id"):
+                    return str(last["id"])
+        except (json.JSONDecodeError, OSError):
+            pass
+    return None
+
+
+def _verify_custom_contract(
+    mod,
+    manifest: dict,
+    operations: list[str],
+    data_path: Path,
+) -> tuple[bool, str]:
+    created_id: str | None = None
+    tested = 0
+    for op in _sort_operations_for_contract(operations):
+        category = _operation_category(op)
+        if category in ("update", "delete") and not created_id:
+            continue
+        params = _contract_params_for_operation(mod, manifest, op, category, created_id)
+        result = mod.run(action=op, **params)
+        tested += 1
         if isinstance(result, dict) and result.get("error"):
             return False, f"action {op!r} failed: {result['error']}"
-    if not seen:
-        return False, "Freeform contract test found no operations to exercise."
+        if category == "create":
+            created_id = _extract_created_id(result, data_path) or created_id
+    if tested == 0:
+        return False, "Custom contract test found no operations to exercise."
     return True, "API contract tests passed."
 
 
@@ -513,7 +596,7 @@ def verify_skill_api_contract(
             spec.loader.exec_module(mod)
 
             if _is_custom_ui(manifest):
-                return _verify_freeform_contract(mod, actions)
+                return _verify_custom_contract(mod, manifest, operations, data_path)
             return _verify_crud_contract(
                 mod, manifest, data_path, actions, operations, template
             )
@@ -835,14 +918,27 @@ def _schema_name_and_description(schema: dict) -> tuple[str, str]:
     return fn.get("name", ""), fn.get("description", "")
 
 
-def prepare_agent_messages(messages: list[dict]) -> list[dict]:
+_TTS_SYSTEM_DIRECTIVE = (
+    "Voice output is ON. Your reply will be read aloud via text-to-speech. "
+    "Keep answers concise and speakable: use plain sentences only in flowing prose. "
+    "Do not use bullet points, numbered lists, headings, markdown, tables, or code blocks "
+    "unless the user explicitly asks for structured or code output. "
+    "Prefer short paragraphs of full sentences over long monologues."
+)
+
+
+def prepare_agent_messages(messages: list[dict], *, tts_enabled: bool = False) -> list[dict]:
     rest: list[dict] = []
     for msg in messages:
         if msg.get("role") == "system":
             continue
         rest.append(msg)
 
-    return [{"role": "system", "content": get_scout_orchestrator_prompt()}, *rest]
+    system = build_scout_system_instruction(
+        get_scout_routing_prompt(),
+        tts_enabled=tts_enabled,
+    )
+    return [{"role": "system", "content": system}, *rest]
 
 
 def _load_local_schemas() -> list[dict]:
@@ -902,6 +998,7 @@ async def aload_dynamic_tools() -> list[dict]:
         build_propose_tool_batch_schema(),
         build_edit_existing_tool_schema(),
         build_open_skill_app_schema(),
+        *PERSONA_TOOL_DECLARATIONS,
     ]
     runtime_loaded = False
     try:
@@ -993,7 +1090,14 @@ async def execute_skill_action(skill_name: str, arguments: dict, *, run_id: str 
 
 
 async def execute_dynamic_tool(name: str, arguments: dict, *, run_id: str = "") -> str:
-    if name in ("generate_new_tool", "edit_existing_tool", "open_skill_app"):
+    from scout_persona import PERSONA_TOOL_NAMES
+
+    if name in (
+        "generate_new_tool",
+        "edit_existing_tool",
+        "open_skill_app",
+        *PERSONA_TOOL_NAMES,
+    ):
         raise ValueError(f"{name} must be intercepted by the orchestrator.")
 
     logger.debug("[run=%s][TOOL] executing %s args=%s", run_id or "-", name, arguments)

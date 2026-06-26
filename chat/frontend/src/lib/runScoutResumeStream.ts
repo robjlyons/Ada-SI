@@ -1,5 +1,8 @@
 import { consumeSseStream } from '../api/sse'
 import { buildMessages, useAppStore } from '../state/store'
+import { startTtsQueue, stopTtsPlayback, type TtsSentenceQueue } from '../lib/ttsPlayback'
+import { resolveTtsVoiceId } from '../utils/ttsVoice'
+import { extractCompletedSentences, extractTrailingSentence } from '../utils/sentenceSplit'
 import {
   extractReasoningFromDelta,
   isAdaEvent,
@@ -55,6 +58,15 @@ export async function runScoutResumeStream({
   store.setIsSending(true)
   store.setStatus('')
 
+  let ttsBuffer = ''
+  let ttsCursor = 0
+  let ttsQueue: TtsSentenceQueue | null = null
+  if (store.ttsEnabled) {
+    ttsQueue = startTtsQueue(resolveTtsVoiceId(store.ttsVoiceId), (error) => {
+      store.setStatus(`Voice playback failed: ${error.message}`, true)
+    })
+  }
+
   try {
     await consumeSseStream({
       url,
@@ -63,6 +75,7 @@ export async function runScoutResumeStream({
         tool_creator_model: store.toolCreatorModel,
         reasoning_effort: store.thinkingEffort,
         gemini_google_search: store.geminiGoogleSearch,
+        tts_enabled: store.ttsEnabled,
         messages: buildMessages(),
         run_id: runId,
         ...body,
@@ -96,6 +109,15 @@ export async function runScoutResumeStream({
           reasoningText: current.reasoningText + reasoning,
           content: current.content + text,
         })
+
+        if (ttsQueue && text) {
+          ttsBuffer += text
+          const { sentences, cursor } = extractCompletedSentences(ttsBuffer, ttsCursor)
+          ttsCursor = cursor
+          for (const sentence of sentences) {
+            ttsQueue.enqueue(sentence)
+          }
+        }
       },
     })
 
@@ -116,11 +138,18 @@ export async function runScoutResumeStream({
         store.pushConversation({ role: 'assistant', content: finalContent })
         if (finalContent !== '(No response)') {
           store.grantXp('chat')
+          if (ttsQueue) {
+            const tail = extractTrailingSentence(ttsBuffer, ttsCursor)
+            if (tail) {
+              ttsQueue.flush(tail)
+            }
+          }
         }
       }
     }
     store.setStatus('')
   } catch (error) {
+    stopTtsPlayback()
     const err = error as Error
     store.removeFeedItem(assistantId)
     store.setStatus(`Scout resume failed: ${err.message}`, true)

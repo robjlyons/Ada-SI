@@ -14,6 +14,8 @@ export function Composer() {
   const isSending = useAppStore((s) => s.isSending)
   const status = useAppStore((s) => s.status)
   const statusIsError = useAppStore((s) => s.statusIsError)
+  const personaBootstrapActive = useAppStore((s) => s.personaBootstrapActive)
+  const openSettings = useAppStore((s) => s.openSettings)
   const setStatus = useAppStore((s) => s.setStatus)
   const { sendMessage, stopGeneration } = useChatStream()
   const speech = useSpeechRecognition()
@@ -98,6 +100,11 @@ export function Composer() {
 
   return (
     <footer className="composer">
+      {personaBootstrapActive ? (
+        <p className="persona-bootstrap-banner">
+          Bootstrap ritual active — follow the conversation to define Scout&apos;s identity.
+        </p>
+      ) : null}
       <form className="composer-form" onSubmit={handleSubmit}>
         <div className="composer-input-wrap">
           <textarea
@@ -162,7 +169,18 @@ export function Composer() {
           </svg>
         </button>
       </form>
-      <p className={`status${statusIsError ? ' error' : ''}`}>{status}</p>
+      <div className="composer-status-row">
+        <p className={`status${statusIsError ? ' error' : ''}`}>{status}</p>
+        {statusIsError && status.toLowerCase().includes('api key') ? (
+          <button
+            type="button"
+            className="btn-secondary btn-sm composer-api-keys-btn"
+            onClick={() => openSettings('api-keys')}
+          >
+            Open API keys
+          </button>
+        ) : null}
+      </div>
     </footer>
   )
 }

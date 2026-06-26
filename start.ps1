@@ -88,6 +88,49 @@ function Import-DotEnv([string]$Path) {
     }
 }
 
+function Import-SecretsJson([string]$Path) {
+    if (-not (Test-Path $Path)) {
+        return
+    }
+    try {
+        $raw = Get-Content $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    catch {
+        Write-Warn "Could not parse secrets.json - skipping."
+        return
+    }
+    $keys = $raw.keys
+    if (-not $keys) {
+        return
+    }
+    $keyMap = @{}
+    foreach ($prop in $keys.PSObject.Properties) {
+        if ($null -ne $prop.Value -and [string]$prop.Value) {
+            $keyMap[$prop.Name] = [string]$prop.Value
+        }
+    }
+    $supported = @(
+        'OPENAI_API_KEY',
+        'ANTHROPIC_API_KEY',
+        'GEMINI_API_KEY',
+        'GROQ_API_KEY',
+        'ELEVENLABS_API_KEY'
+    )
+    foreach ($name in $supported) {
+        if (-not $keyMap.ContainsKey($name)) {
+            continue
+        }
+        $value = $keyMap[$name]
+        if (-not $value) {
+            continue
+        }
+        $existing = [Environment]::GetEnvironmentVariable($name)
+        if (-not $existing) {
+            Set-Item -Path "Env:$name" -Value $value
+        }
+    }
+}
+
 function Find-Python312 {
     $candidates = @(
         'py -3.12',
@@ -286,6 +329,9 @@ else {
     Write-Ok "Loaded .env"
 }
 
+$SecretsFile = Join-Path $Root 'chat\staging\secrets.json'
+Import-SecretsJson $SecretsFile
+
 Write-Step "Preparing Python environment"
 Ensure-Venv -VenvPath $VenvDir -PythonLauncher $pythonLauncher
 Ensure-Venv -VenvPath $LitellmVenvDir -PythonLauncher $pythonLauncher
@@ -350,6 +396,7 @@ $sharedEnv = @{
     ANTHROPIC_API_KEY      = $(if ($env:ANTHROPIC_API_KEY) { $env:ANTHROPIC_API_KEY } else { '' })
     GEMINI_API_KEY         = $(if ($env:GEMINI_API_KEY) { $env:GEMINI_API_KEY } else { '' })
     GROQ_API_KEY           = $(if ($env:GROQ_API_KEY) { $env:GROQ_API_KEY } else { '' })
+    ELEVENLABS_API_KEY     = $(if ($env:ELEVENLABS_API_KEY) { $env:ELEVENLABS_API_KEY } else { '' })
     ADA_LOG_LEVEL          = $(if ($env:ADA_LOG_LEVEL) { $env:ADA_LOG_LEVEL } else { 'INFO' })
     ADA_LOG_MAX_BODY       = $(if ($env:ADA_LOG_MAX_BODY) { $env:ADA_LOG_MAX_BODY } else { '32000' })
     LITE_MODEL_REASONING_EFFORT = $(if ($env:LITE_MODEL_REASONING_EFFORT) { $env:LITE_MODEL_REASONING_EFFORT } else { 'low' })

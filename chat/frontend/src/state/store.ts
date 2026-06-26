@@ -6,7 +6,10 @@ import {
   PROGRESSION_STORAGE_KEY,
   SECOND_MODEL_STORAGE_KEY,
   THINKING_EFFORT_STORAGE_KEY,
+  TTS_ENABLED_STORAGE_KEY,
+  TTS_VOICE_ID_STORAGE_KEY,
   VIEWER_PHASES,
+  type SettingsSection,
 } from '../constants'
 import { EMPTY_PROMPTS, createEmptyEffectivePrompts } from '../components/toolbar/promptSections'
 import type {
@@ -96,9 +99,12 @@ type AppState = {
   toolCreatorModel: string
   thinkingEffort: ReasoningEffort
   geminiGoogleSearch: boolean
+  ttsEnabled: boolean
+  ttsVoiceId: string
   prompts: PromptsConfig
   effectivePrompts: EffectivePrompts
   settingsOpen: boolean
+  settingsSection: SettingsSection
   promptsSaveState: PromptsSaveState
   conversation: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>
   feed: FeedItem[]
@@ -120,6 +126,8 @@ type AppState = {
   abortController: AbortController | null
   runAbortControllers: Map<string, AbortController>
   forgeBatch: ForgeBatchState | null
+  personaBootstrapActive: boolean
+  scoutDisplayName: string
 
   setAppConfig: (config: AppConfig) => void
   setModels: (models: string[]) => void
@@ -127,9 +135,14 @@ type AppState = {
   setToolCreatorModel: (model: string) => void
   setThinkingEffort: (effort: ReasoningEffort) => void
   setGeminiGoogleSearch: (enabled: boolean) => void
+  setTtsEnabled: (enabled: boolean) => void
+  setTtsVoiceId: (voiceId: string) => void
   setPrompts: (prompts: PromptsConfig, effective: EffectivePrompts) => void
   setSettingsOpen: (open: boolean) => void
+  openSettings: (section?: SettingsSection) => void
   setPromptsSaveState: (status: PromptsSaveState['status'], message?: string) => void
+  setPersonaBootstrapActive: (active: boolean) => void
+  setScoutDisplayName: (name: string) => void
   setStatus: (text: string, isError?: boolean) => void
   setIsSending: (active: boolean) => void
   setActiveSidePanelTab: (tab: SidePanelTab) => void
@@ -295,9 +308,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   toolCreatorModel: loadStorage(SECOND_MODEL_STORAGE_KEY),
   thinkingEffort: normalizeReasoningEffort(loadStorage(THINKING_EFFORT_STORAGE_KEY)),
   geminiGoogleSearch: loadBooleanStorage(GEMINI_GOOGLE_SEARCH_STORAGE_KEY),
+  ttsEnabled: loadBooleanStorage(TTS_ENABLED_STORAGE_KEY),
+  ttsVoiceId: loadStorage(TTS_VOICE_ID_STORAGE_KEY),
   prompts: EMPTY_PROMPTS,
   effectivePrompts: createEmptyEffectivePrompts(),
   settingsOpen: false,
+  settingsSection: 'agents',
   promptsSaveState: { status: 'idle' },
   conversation: [],
   feed: [],
@@ -319,6 +335,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   abortController: null,
   runAbortControllers: new Map(),
   forgeBatch: null,
+  personaBootstrapActive: false,
+  scoutDisplayName: 'ADA',
 
   setAppConfig: (config) => set({ appConfig: config }),
   setModels: (models) => set({ models }),
@@ -338,12 +356,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     localStorage.setItem(GEMINI_GOOGLE_SEARCH_STORAGE_KEY, enabled ? 'true' : 'false')
     set({ geminiGoogleSearch: enabled })
   },
+  setTtsEnabled: (enabled) => {
+    localStorage.setItem(TTS_ENABLED_STORAGE_KEY, enabled ? 'true' : 'false')
+    set({ ttsEnabled: enabled })
+  },
+  setTtsVoiceId: (voiceId) => {
+    localStorage.setItem(TTS_VOICE_ID_STORAGE_KEY, voiceId)
+    set({ ttsVoiceId: voiceId })
+  },
   setPrompts: (prompts, effective) => set({ prompts, effectivePrompts: effective }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
+  openSettings: (section = 'agents') => set({ settingsOpen: true, settingsSection: section }),
   setPromptsSaveState: (status, message = '') =>
     set({
       promptsSaveState: status === 'error' ? { status, message } : { status },
     }),
+  setPersonaBootstrapActive: (active) => set({ personaBootstrapActive: active }),
+  setScoutDisplayName: (name) =>
+    set({ scoutDisplayName: (name || 'ADA').trim() || 'ADA' }),
   setStatus: (text, isError = false) => set({ status: text, statusIsError: isError }),
   setIsSending: (active) => set({ isSending: active }),
   setActiveSidePanelTab: (tab) => set({ activeSidePanelTab: tab }),

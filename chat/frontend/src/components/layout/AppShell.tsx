@@ -11,8 +11,6 @@ import { ForgeBatchDock, ForgeBatchModal } from '../tools/ForgeBatchModal'
 
 export function AppShell() {
   const feed = useAppStore((s) => s.feed)
-  const showScrollBottom = useAppStore((s) => s.showScrollBottom)
-  const setShowScrollBottom = useAppStore((s) => s.setShowScrollBottom)
 
   return (
     <div className="app-shell">
@@ -21,17 +19,7 @@ export function AppShell() {
         <div className="main-column">
           <ModelToolbar />
           <div className="chat-surface glass-panel">
-            <div className="messages-wrap">
-              <Messages feed={feed} />
-              <button
-                type="button"
-                className={`scroll-bottom${showScrollBottom ? '' : ' hidden'}`}
-                title="Scroll to latest"
-                onClick={() => setShowScrollBottom(false)}
-              >
-                ↓ New intel
-              </button>
-            </div>
+            <Messages feed={feed} />
             <Composer />
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { fetchConfig, fetchModels } from '../api/client'
 import { THINKING_EFFORT_STORAGE_KEY } from '../constants'
+import { syncScoutDisplayName } from '../lib/syncScoutDisplayName'
 import { useAppStore } from '../state/store'
 import { isWildcardModel } from '../utils/models'
 import { normalizeReasoningEffort } from '../utils/reasoningEffort'
@@ -33,7 +34,7 @@ export function useAgentBootstrap() {
 
       if (modelList.length === 0) {
         setModels([])
-        setStatus('No agents available. Add API keys to .env and restart.', true)
+        setStatus('No agents available. Add API keys in Settings or .env, then restart.', true)
         return
       }
 
@@ -56,6 +57,7 @@ export function useAgentBootstrap() {
       const { fetchTools } = await import('../api/client')
       const tools = await fetchTools()
       setTools(tools)
+      void syncScoutDisplayName()
       const currentStatus = useAppStore.getState().status
       if (!currentStatus.startsWith('Could not load prompts')) {
         setStatus('')

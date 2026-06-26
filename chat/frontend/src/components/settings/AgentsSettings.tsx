@@ -5,6 +5,7 @@ import { REASONING_EFFORT_OPTIONS, type ReasoningEffort } from '../../utils/reas
 
 export function AgentsSettings() {
   const models = useAppStore((s) => s.models)
+  const openSettings = useAppStore((s) => s.openSettings)
   const chatModel = useAppStore((s) => s.chatModel)
   const toolCreatorModel = useAppStore((s) => s.toolCreatorModel)
   const thinkingEffort = useAppStore((s) => s.thinkingEffort)
@@ -57,11 +58,14 @@ export function AgentsSettings() {
           <h3>Agents &amp; analysis depth</h3>
           <p className="settings-section-desc">
             Choose which models power chat orchestration and skill forging, and how much reasoning
-            depth they use.
+            depth they use. Add LLM API keys under the API Keys section if no models appear.
           </p>
         </div>
         <button type="button" className="btn-secondary btn-sm" onClick={() => void loadAgents()}>
           Reload available models
+        </button>
+        <button type="button" className="btn-secondary btn-sm" onClick={() => openSettings('api-keys')}>
+          Open API keys
         </button>
       </div>
 

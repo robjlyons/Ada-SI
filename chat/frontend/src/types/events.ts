@@ -41,6 +41,25 @@ export type PipPackage = {
   used_by?: string[]
 }
 
+export type SecretKey =
+  | 'OPENAI_API_KEY'
+  | 'ANTHROPIC_API_KEY'
+  | 'GEMINI_API_KEY'
+  | 'GROQ_API_KEY'
+  | 'ELEVENLABS_API_KEY'
+
+export type SecretStatus = {
+  configured: boolean
+  hint: string
+}
+
+export type SecretsStatusMap = Partial<Record<SecretKey, SecretStatus>>
+
+export type TtsVoice = {
+  voice_id: string
+  name: string
+}
+
 export type PromptsConfig = {
   scout_orchestrator_prefix: string
   scout_orchestrator_suffix: string
@@ -70,6 +89,7 @@ export type PromptsConfig = {
 
 export type EffectivePrompts = {
   scout_orchestrator: string
+  scout_composed_system: string
   forge_plan: string
   forge_revise_plan: string
   forge_edit_plan: string
@@ -92,6 +112,31 @@ export type EffectivePrompts = {
 export type PromptsResponse = {
   prompts: PromptsConfig
   effective: EffectivePrompts
+}
+
+export type PersonaFileKey =
+  | 'agents'
+  | 'soul'
+  | 'identity'
+  | 'user'
+  | 'tools'
+  | 'memory'
+  | 'heartbeat'
+
+export type PersonaConfig = {
+  heartbeat_enabled: boolean
+  heartbeat_interval_minutes: number
+}
+
+export type PersonaResponse = {
+  files: Record<PersonaFileKey, string>
+  config: PersonaConfig
+  heartbeat: Record<string, unknown>
+  bootstrap_present: boolean
+  persona_dir: string
+  display_name?: string
+  ok?: boolean
+  suggested_opener?: string
 }
 
 /** @deprecated Use PromptsConfig */
@@ -378,6 +423,7 @@ export type AdaEvent =
     }
   | { ada_event: 'open_skill_app'; run_id: string; skill_name: string }
   | { ada_event: 'skill_data_changed'; run_id: string; skill_name: string }
+  | { ada_event: 'persona_updated'; run_id: string; tool?: string; display_name?: string }
   | { ada_event: 'chat_error'; run_id?: string; detail?: string }
   | {
       ada_event: 'search_sources'

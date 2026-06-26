@@ -4,6 +4,7 @@ services:
     container_name: ada-litellm
     volumes:
       - ./litellm/config.yaml:/app/config.yaml
+      - ./chat/staging:/app/staging
     env_file:
       - .env
     command:
@@ -29,6 +30,7 @@ services:
     environment:
       - TOOLS_DIR=/app/custom_tools
       - VENV_PATH=/app/venv
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
     healthcheck:
       test:
         - CMD-SHELL
@@ -54,6 +56,8 @@ services:
       - ./chat/prompts_config.py:/app/prompts_config.py
       - ./chat/forger_guidance.py:/app/forger_guidance.py
       - ./chat/tools_engine.py:/app/tools_engine.py
+      - ./chat/secrets_config.py:/app/secrets_config.py
+      - ./chat/elevenlabs_tts.py:/app/elevenlabs_tts.py
       - ./chat/tool_creator.py:/app/tool_creator.py
       - ./chat/tool_verify.py:/app/tool_verify.py
     environment:
@@ -64,6 +68,11 @@ services:
       - CHAT_MODEL=${CHAT_MODEL:-}
       - SECOND_MODEL=${SECOND_MODEL:-}
       - TOOL_RUNTIME_URL=http://tool-runtime:8090
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
       - ADA_LOG_LEVEL=${ADA_LOG_LEVEL:-INFO}
       - ADA_LOG_MAX_BODY=${ADA_LOG_MAX_BODY:-32000}
     depends_on:

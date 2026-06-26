@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -8,9 +9,10 @@ from pathlib import Path
 
 import httpx
 from fastapi import Body, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from elevenlabs_tts import list_voices, stream_speech, synthesize_speech
 from prompts_config import (
     PROMPT_KEYS,
     default_prompts_config,
@@ -18,6 +20,13 @@ from prompts_config import (
     prompts_config_response,
     reset_prompts_config,
     save_prompts_config,
+)
+from secrets_config import (
+    SUPPORTED_SECRET_KEYS,
+    apply_secrets_to_environ,
+    clear_secret,
+    save_secrets_raw,
+    secrets_status_response,
 )
 from build_ui_qa import stream_interactive_ui_qa
 from forge_batch import (
@@ -67,6 +76,23 @@ from debug_log import (
     log_sandbox,
     log_stream_delta,
     log_tool_execution,
+)
+from heartbeat_service import heartbeat_supervisor_loop
+from scout_persona import (
+    PERSONA_TOOL_NAMES,
+    BOOTSTRAP_OPENING_TRIGGER,
+    ensure_persona_layout,
+    execute_persona_tool,
+    migrate_scout_additional_directives,
+    parse_identity_display_name,
+    parse_persona_api_file,
+    persona_api_response,
+    persona_status,
+    read_bootstrap_markdown,
+    reset_persona_markdown_to_templates,
+    save_persona_config,
+    start_bootstrap_ritual,
+    write_persona_markdown,
 )
 from litellm_client import (
     SSE_HEADERS,
@@ -165,6 +191,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.on_event("startup")
 async def startup_check() -> None:
+    apply_secrets_to_environ()
     set_runtime_url(TOOL_RUNTIME_URL)
     runtime_ok, runtime_reason = await runtime_health()
     if runtime_ok:
@@ -174,6 +201,22 @@ async def startup_check() -> None:
 
     load_prompts_config(refresh=True)
     logger.info("Prompts config loaded from staging.")
+
+    ensure_persona_layout()
+    config = load_prompts_config()
+    directives = config.get("scout_additional_directives", "")
+    if migrate_scout_additional_directives(directives):
+        save_prompts_config({**config, "scout_additional_directives": ""})
+        logger.info("Migrated scout_additional_directives into USER.md.")
+
+    asyncio.create_task(
+        heartbeat_supervisor_loop(
+            lite_model=LITE_MODEL,
+            litellm_url=LITELLM_URL,
+            litellm_headers_fn=litellm_headers,
+            reasoning_effort=LITE_MODEL_REASONING_EFFORT,
+        )
+    )
 
 
 def litellm_headers() -> dict[str, str]:
@@ -254,6 +297,10 @@ def resolve_reasoning_effort(
 def resolve_gemini_google_search(payload: dict, model: str) -> bool:
     """True when the user enabled search and the given model is Gemini."""
     return bool(payload.get("gemini_google_search")) and is_gemini_model(model)
+
+
+def resolve_tts_enabled(payload: dict) -> bool:
+    return bool(payload.get("tts_enabled"))
 
 
 async def stream_lite_model_turn(
@@ -502,6 +549,7 @@ async def run_agent_stream(
     reasoning_effort: str | None = None,
     gemini_google_search: bool = False,
     forge_gemini_google_search: bool = False,
+    tts_enabled: bool = False,
 ):
     """Async generator that yields SSE strings as each process step occurs."""
     clear_run_cancelled(run_id)
@@ -510,7 +558,7 @@ async def run_agent_stream(
     )
 
     tools = await aload_dynamic_tools()
-    working_messages = prepare_agent_messages(messages)
+    working_messages = prepare_agent_messages(messages, tts_enabled=tts_enabled)
     tool_names = [
         (t.get("function") or t).get("name", "?") for t in tools
     ]
@@ -931,6 +979,43 @@ async def run_agent_stream(
                     )
                     continue
 
+                if name in PERSONA_TOOL_NAMES:
+                    yield process_step(
+                        run_id,
+                        "tool_execute",
+                        f"Persona tool: {name}",
+                        "active",
+                        detail=name,
+                    )
+                    result_dict = execute_persona_tool(name, args)
+                    result = json.dumps(result_dict)
+                    log_tool_execution(
+                        run_id, name=name, arguments=args, result=result
+                    )
+                    yield process_step(
+                        run_id,
+                        "tool_execute",
+                        f"Persona tool: {name}",
+                        "done" if result_dict.get("ok") else "error",
+                        detail=name,
+                    )
+                    if result_dict.get("ok"):
+                        yield {
+                            "_event": "persona_updated",
+                            "run_id": run_id,
+                            "tool": name,
+                            "display_name": result_dict.get("display_name")
+                            or parse_identity_display_name(),
+                        }
+                    working_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call["id"],
+                            "content": result,
+                        }
+                    )
+                    continue
+
                 yield process_step(
                     run_id,
                     "tool_execute",
@@ -1045,6 +1130,134 @@ async def update_prompts(payload: dict = Body(...)) -> dict:
 async def reset_prompts() -> dict:
     reset_prompts_config()
     return prompts_config_response()
+
+
+@app.get("/api/persona")
+async def get_persona() -> dict:
+    return persona_api_response()
+
+
+@app.get("/api/persona/status")
+async def get_persona_status() -> dict:
+    return persona_status()
+
+
+@app.put("/api/persona")
+async def update_persona(payload: dict = Body(...)) -> dict:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+    file_key = payload.get("file", "")
+    content = payload.get("content")
+    if not isinstance(content, str):
+        raise HTTPException(status_code=400, detail="content must be a string.")
+    parsed = parse_persona_api_file(str(file_key))
+    if parsed is None:
+        raise HTTPException(
+            status_code=400,
+            detail="file must be one of: agents, soul, identity, user, tools, memory, heartbeat",
+        )
+    write_persona_markdown(parsed, content)
+    return persona_api_response()
+
+
+@app.post("/api/persona/reset")
+async def reset_persona() -> dict:
+    reset_persona_markdown_to_templates()
+    return persona_api_response()
+
+
+@app.post("/api/persona/bootstrap")
+async def bootstrap_persona() -> dict:
+    result = start_bootstrap_ritual()
+    return {**persona_api_response(), **result}
+
+
+@app.put("/api/persona/config")
+async def update_persona_config(payload: dict = Body(...)) -> dict:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+    allowed = {"heartbeat_enabled", "heartbeat_interval_minutes"}
+    updates = {k: v for k, v in payload.items() if k in allowed}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No valid config keys provided.")
+    save_persona_config(updates)
+    return persona_api_response()
+
+
+@app.get("/api/secrets")
+async def get_secrets() -> dict:
+    return {"secrets": secrets_status_response()}
+
+
+@app.put("/api/secrets")
+async def update_secrets(payload: dict = Body(...)) -> dict:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+    updates = payload.get("secrets", payload)
+    if not isinstance(updates, dict):
+        raise HTTPException(status_code=400, detail="Expected a secrets object.")
+    unknown = [key for key in updates if key not in SUPPORTED_SECRET_KEYS]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown secret keys: {', '.join(unknown)}",
+        )
+    try:
+        normalized = {str(key): str(value) for key, value in updates.items()}
+        save_secrets_raw(normalized)
+        apply_secrets_to_environ()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"secrets": secrets_status_response()}
+
+
+@app.delete("/api/secrets/{key_name}")
+async def remove_secret(key_name: str) -> dict:
+    if key_name not in SUPPORTED_SECRET_KEYS:
+        raise HTTPException(status_code=400, detail=f"Unknown secret key: {key_name}")
+    clear_secret(key_name)
+    apply_secrets_to_environ()
+    return {"secrets": secrets_status_response()}
+
+
+@app.post("/api/tts")
+async def text_to_speech(payload: dict = Body(...)) -> Response:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+    text = payload.get("text", "")
+    voice_id = payload.get("voice_id")
+    try:
+        audio = await synthesize_speech(text, voice_id=voice_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(content=audio, media_type="audio/mpeg")
+
+
+@app.post("/api/tts/stream")
+async def text_to_speech_stream(payload: dict = Body(...)) -> StreamingResponse:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+    text = payload.get("text", "")
+    voice_id = payload.get("voice_id")
+    try:
+        audio_stream = stream_speech(text, voice_id=voice_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    async def audio_iter():
+        async for chunk in audio_stream:
+            yield chunk
+
+    return StreamingResponse(audio_iter(), media_type="audio/mpeg")
+
+
+@app.get("/api/tts/voices")
+async def get_tts_voices() -> dict:
+    try:
+        voices = await list_voices()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"voices": voices}
 
 
 @app.get("/api/forger-guidance")
@@ -1274,10 +1487,20 @@ async def chat(request: Request) -> StreamingResponse:
     reasoning_effort = resolve_reasoning_effort(body.get("reasoning_effort"))
     gemini_google_search = resolve_gemini_google_search(body, lite_model)
     forge_gemini_google_search = resolve_gemini_google_search(body, tool_creator_model)
+    tts_enabled = resolve_tts_enabled(body)
+    bootstrap_opening = bool(body.get("bootstrap_opening"))
 
     if not lite_model:
         raise HTTPException(status_code=400, detail="No lite model selected.")
-    if not isinstance(messages, list) or not messages:
+
+    if bootstrap_opening:
+        if not read_bootstrap_markdown().strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Bootstrap ritual is not active. Start it from Persona settings first.",
+            )
+        messages = [{"role": "user", "content": BOOTSTRAP_OPENING_TRIGGER}]
+    elif not isinstance(messages, list) or not messages:
         raise HTTPException(status_code=400, detail="messages must be a non-empty list.")
 
     async def event_stream():
@@ -1290,6 +1513,7 @@ async def chat(request: Request) -> StreamingResponse:
             reasoning_effort=reasoning_effort,
             gemini_google_search=gemini_google_search,
             forge_gemini_google_search=forge_gemini_google_search,
+            tts_enabled=tts_enabled,
         ):
             yield chunk
 
@@ -1308,6 +1532,7 @@ async def stream_agent_sse(
     reasoning_effort: str | None,
     gemini_google_search: bool = False,
     forge_gemini_google_search: bool = False,
+    tts_enabled: bool = False,
 ):
     """Yield SSE chunks from a Scout agent run (shared by chat and resume endpoints)."""
     try:
@@ -1320,6 +1545,7 @@ async def stream_agent_sse(
             reasoning_effort=reasoning_effort,
             gemini_google_search=gemini_google_search,
             forge_gemini_google_search=forge_gemini_google_search,
+            tts_enabled=tts_enabled,
         ):
             if await request.is_disconnected():
                 return
@@ -1378,6 +1604,17 @@ async def stream_agent_sse(
                     }
                 )
                 continue
+
+            if item.get("_event") == "persona_updated":
+                yield sse_data(
+                    {
+                        "ada_event": "persona_updated",
+                        "run_id": item["run_id"],
+                        "tool": item.get("tool", ""),
+                        "display_name": item.get("display_name", ""),
+                    }
+                )
+                continue
     except HTTPException as exc:
         log_error(run_id, "CHAT", f"HTTPException: {exc.detail}")
         yield process_step(
@@ -1413,6 +1650,7 @@ async def resume_scout(request: Request, payload: dict = Body(...)) -> Streaming
     reasoning_effort = resolve_reasoning_effort(payload.get("reasoning_effort"))
     gemini_google_search = resolve_gemini_google_search(payload, lite_model)
     forge_gemini_google_search = resolve_gemini_google_search(payload, tool_creator_model)
+    tts_enabled = resolve_tts_enabled(payload)
     tool_name = payload.get("tool_name", "").strip()
     install_message = payload.get("message", "").strip()
     context = payload.get("context", "").strip()
@@ -1441,6 +1679,7 @@ async def resume_scout(request: Request, payload: dict = Body(...)) -> Streaming
             reasoning_effort=reasoning_effort,
             gemini_google_search=gemini_google_search,
             forge_gemini_google_search=forge_gemini_google_search,
+            tts_enabled=tts_enabled,
         ):
             yield chunk
 
@@ -1764,6 +2003,7 @@ async def forge_batch_resume_agent(request: Request, payload: dict = Body(...)) 
     reasoning_effort = resolve_reasoning_effort(payload.get("reasoning_effort"))
     gemini_google_search = resolve_gemini_google_search(payload, lite_model)
     forge_gemini_google_search = resolve_gemini_google_search(payload, tool_creator_model)
+    tts_enabled = resolve_tts_enabled(payload)
 
     if not lite_model:
         raise HTTPException(status_code=400, detail="No lite model selected.")
@@ -1783,6 +2023,7 @@ async def forge_batch_resume_agent(request: Request, payload: dict = Body(...)) 
             reasoning_effort=reasoning_effort,
             gemini_google_search=gemini_google_search,
             forge_gemini_google_search=forge_gemini_google_search,
+            tts_enabled=tts_enabled,
         ):
             yield chunk
 

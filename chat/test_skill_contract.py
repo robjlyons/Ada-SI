@@ -254,9 +254,96 @@ def test_verify_skill_api_contract_custom_stopwatch():
     assert ok, reason
 
 
+TODO_TOOL = '''
+import json
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+def get_tool_schema():
+    return {
+        "name": "todo_list_app",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list_tasks", "add_task", "complete_task", "delete_task"],
+                },
+                "title": {"type": "string"},
+                "task_id": {"type": "string"},
+            },
+            "required": ["action"],
+        },
+    }
+
+def run(action, title=None, task_id=None):
+    p = Path(__file__).parent / "skill_data" / "todo_list_app.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if p.exists():
+        data = json.loads(p.read_text())
+    else:
+        data = {"records": []}
+    if action == "list_tasks":
+        return data
+    if action == "add_task":
+        if not title:
+            return {"error": "title is required for add_task"}
+        task = {
+            "id": str(uuid.uuid4()),
+            "title": title,
+            "status": "pending",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        data["records"].append(task)
+        p.write_text(json.dumps(data))
+        return task
+    if action == "complete_task":
+        if not task_id:
+            return {"error": "task_id is required for complete_task"}
+        for task in data["records"]:
+            if task["id"] == task_id:
+                task["status"] = "completed"
+                p.write_text(json.dumps(data))
+                return task
+        return {"error": "not found"}
+    if action == "delete_task":
+        if not task_id:
+            return {"error": "task_id is required for delete_task"}
+        data["records"] = [t for t in data["records"] if t["id"] != task_id]
+        p.write_text(json.dumps(data))
+        return {"success": True}
+    return {"error": "unknown"}
+'''
+
+TODO_MANIFEST = {
+    "kind": "interactive",
+    "display_name": "Todo List",
+    "operations": ["list_tasks", "add_task", "complete_task", "delete_task"],
+    "ui": {
+        "template": "custom",
+        "entry": "index.html",
+        "actions": {
+            "fetch": "list_tasks",
+            "create": "add_task",
+            "toggle": "complete_task",
+            "delete": "delete_task",
+        },
+    },
+}
+
+
+def test_verify_skill_api_contract_custom_todo_list():
+    ok, reason = tools_engine.verify_skill_api_contract(
+        "todo_list_app", TODO_TOOL, dict(TODO_MANIFEST)
+    )
+    assert ok, reason
+
+
 if __name__ == "__main__":
     test_verify_skill_api_contract_list()
     test_verify_skill_api_contract_table()
     test_verify_skill_api_contract_custom_notes()
     test_verify_skill_api_contract_custom_stopwatch()
+    test_verify_skill_api_contract_custom_todo_list()
     print("All test_skill_contract tests passed.")
