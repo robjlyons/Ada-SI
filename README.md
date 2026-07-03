@@ -6,8 +6,28 @@
 
 The UI title is **ADA Chat**. Scout is the main agent; a separate **Forge master** agent plans, writes, tests, and installs new tools when Scout needs capabilities it does not yet have.
 
+## ⚠️ Disclaimer — Read Before Installing
+
+**This project is an experiment.** It was built to explore local AI assistants that can extend their own capabilities at runtime. It is **not** production software, has **not** been audited for security, and may contain bugs or unsafe behavior.
+
+**Do not download, clone, or install Ada-SI unless you understand what it does and accept the risks.**
+
+When you run Ada-SI, you grant an AI substantial control over your computer:
+
+- **Scout** can call installed skills and propose new ones that run **arbitrary Python** on your machine.
+- The **Forge** pipeline can **install pip packages** and write executable code to disk (with your approval at several steps — but approval gates reduce accidents; they are **not** a security sandbox).
+- Forged skills run in an **isolated Python venv**, not a hardened container. They can still read/write files, spawn subprocesses, and make network requests within your OS user permissions.
+- There is **no login or authentication**. Anyone who can reach the chat server (port 8080) or, on native installs, the tool runtime (port 8090) can use your API keys, forge tools, and run code.
+- API keys are stored in `.env` and `chat/staging/secrets.json` and may be readable by forged tools via environment variables.
+
+**Use Ada-SI only on a trusted machine, for a single user, on localhost.** Do not expose it to the public internet without a reverse proxy, VPN, or IP allowlist — and even then, treat it as high-risk software. If you are unsure, **do not run this project.**
+
+See also [Security & Trust](#security--trust) for a fuller threat model.
+
 ## Table of Contents
 
+- [Disclaimer](#-disclaimer--read-before-installing)
+- [Security & Trust](#security--trust)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
@@ -28,6 +48,24 @@ The UI title is **ADA Chat**. Scout is the main agent; a separate **Forge master
 
 ---
 
+## Security & Trust
+
+Ada-SI is designed for **one person on one trusted machine**. It is not multi-tenant software.
+
+| Risk | Detail |
+|------|--------|
+| **No authentication** | Chat, forge, secrets, and persona APIs are open to anyone who can reach the service. Native installs also expose the tool runtime on `127.0.0.1:8090` with no auth — any local process can install packages or run tools. |
+| **AI computer control** | Scout and forged skills can execute Python, modify files under `chat/custom_tools/` and `chat/staging/`, install pip packages, and update persona/memory files. Background **heartbeat** can trigger LLM calls on a timer. |
+| **Weak isolation** | Tool execution uses a separate Python venv, not OS-level sandboxing. Do not treat forged skills as safe — treat them like running **untrusted scripts** you wrote yourself. |
+| **Supply chain** | Pip packages installed during forge (including pre-approval sandbox tests) can run install-time code on your host. Review package approvals in the Supplies tab. |
+| **Secrets exposure** | Provider API keys live in `.env`, `chat/staging/secrets.json`, and process environment. Forged tools may read `os.environ`. |
+| **Debug logging** | `ADA_LOG_LEVEL=DEBUG` may log chat content, tool arguments, and generated code to `logs/chat.log`. |
+| **VPS / remote use** | If you deploy with Docker, bind behind HTTPS, restrict network access, and assume port 8080 is fully privileged. Consider disabling forge on any internet-facing host. |
+
+Human-in-the-loop gates (plan approval, pip approval, UI preview) help prevent mistakes. They do **not** prevent a determined or prompt-injected model from proposing harmful tools — you are the last line of defense.
+
+---
+
 ## Features
 
 - **Gamified chat UI** — XP, levels (1–50), rank titles, level-up effects, and a 3D avatar visualizer
@@ -43,7 +81,7 @@ The UI title is **ADA Chat**. Scout is the main agent; a separate **Forge master
 
 ## Architecture
 
-Ada-SI runs as three cooperating services. The chat server serves the React UI and orchestrates everything; LiteLLM routes LLM calls; the tool runtime executes forged Python skills in an isolated virtual environment.
+Ada-SI runs as three cooperating services. The chat server serves the React UI and orchestrates everything; LiteLLM routes LLM calls; the tool runtime executes forged Python skills in an isolated Python venv (not OS-level sandboxing).
 
 ```mermaid
 flowchart LR
@@ -66,7 +104,7 @@ flowchart LR
 |---------|------|------|----------|
 | **Chat server** | 8080 | FastAPI backend, SSE chat, forge APIs, persona, TTS; serves built React UI | [`chat/app.py`](chat/app.py) |
 | **LiteLLM proxy** | 4000 | Routes model requests to LLM providers | [`litellm/config.yaml`](litellm/config.yaml) |
-| **Tool runtime** | 8090 | Executes installed Python skills in a sandboxed venv | [`tool_runtime/server.py`](tool_runtime/server.py) |
+| **Tool runtime** | 8090 | Executes installed Python skills in an isolated venv (not OS-level sandboxing) | [`tool_runtime/server.py`](tool_runtime/server.py) |
 | **Vite dev server** (optional) | 5173 | Hot-reload frontend; proxies `/api` to chat server | [`chat/frontend/vite.config.ts`](chat/frontend/vite.config.ts) |
 
 **Frontend** — React 19 + TypeScript + Vite, source in [`chat/frontend/`](chat/frontend), production build output in [`chat/static/`](chat/static).
@@ -462,7 +500,8 @@ Scout can propose **2–10 independent tools** at once via `propose_tool_batch`:
 - Open from the **Skills** tab in the right sidebar, or ask Scout to open one
 - UI templates: `calendar`, `list`, `table`, or `custom` (iframe)
 - Skill actions run via `POST /api/skills/{name}/action`
-- Persistent data is stored under `chat/custom_tools/{skill_name}/skill_data/`
+- Persistent data is stored at `chat/custom_tools/skill_data/{skill_name}.json`
+- Custom UI assets live under `chat/custom_tools/ui/{skill_name}/`
 
 **Removing skills** — Delete from the Skills tab, or use Settings → Progress → reset.
 
@@ -671,7 +710,7 @@ All routes are defined in [`chat/app.py`](chat/app.py). Grouped by area:
 | `/api/skills/{name}/ui` | GET | Skill UI entry HTML |
 | `/api/skills/{name}/ui/{path}` | GET | Skill UI static assets |
 | `/api/skills/{name}/action` | POST | Run skill action from UI |
-| `/api/skills/{name}/data` | GET/PUT | Skill persistent JSON data |
+| `/api/skills/{name}/data` | GET | Read skill persistent JSON data (writes go through `POST .../action`) |
 | `/api/pip/packages` | GET | Installed pip packages |
 | `/api/pip/packages/{name}` | DELETE | Uninstall package |
 
@@ -694,7 +733,7 @@ All routes are defined in [`chat/app.py`](chat/app.py). Grouped by area:
 | `/api/tts/stream` | POST | Streaming TTS |
 | `/api/tts/voices` | GET | List TTS voices |
 
-**Tool runtime** (internal, port 8090) — see [`tool_runtime/server.py`](tool_runtime/server.py): `/health`, `/tools`, `/tools/{name}/run`, `/tools/{name}/install`, `/pip/install`.
+**Tool runtime** (internal, port 8090; **unauthenticated** on native installs) — see [`tool_runtime/server.py`](tool_runtime/server.py): `/health`, `/tools`, `/tools/{name}/run`, `/tools/{name}/install`, `/tools/{name}/verify`, `DELETE /tools/{name}`, `/pip/install`, `/pip/packages`, `/manifest`.
 
 Frontend API client: [`chat/frontend/src/api/client.ts`](chat/frontend/src/api/client.ts).
 
@@ -759,7 +798,7 @@ Set `ADA_LOG_LEVEL=DEBUG` in `.env` for verbose stream logging.
 |-------|--------------|
 | **Backend** | Python 3.12, FastAPI, Uvicorn, httpx |
 | **LLM routing** | LiteLLM proxy |
-| **Tool sandbox** | Separate FastAPI service + Python venv |
+| **Tool execution** | Separate FastAPI service + isolated Python venv (not OS sandbox) |
 | **Frontend** | React 19, TypeScript, Vite 8 |
 | **UI / graphics** | Framer Motion, Three.js, @react-three/fiber, Zustand |
 | **Markdown** | react-markdown, highlight.js, rehype-sanitize |

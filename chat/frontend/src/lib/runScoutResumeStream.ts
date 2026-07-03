@@ -2,7 +2,7 @@ import { consumeSseStream } from '../api/sse'
 import { buildMessages, useAppStore } from '../state/store'
 import { startTtsQueue, stopTtsPlayback, type TtsSentenceQueue } from '../lib/ttsPlayback'
 import { resolveTtsVoiceId } from '../utils/ttsVoice'
-import { extractCompletedSentences, extractTrailingSentence } from '../utils/sentenceSplit'
+import { appendTtsDelta, flushTtsTail } from '../utils/ttsText'
 import {
   extractReasoningFromDelta,
   isAdaEvent,
@@ -111,10 +111,10 @@ export async function runScoutResumeStream({
         })
 
         if (ttsQueue && text) {
-          ttsBuffer += text
-          const { sentences, cursor } = extractCompletedSentences(ttsBuffer, ttsCursor)
-          ttsCursor = cursor
-          for (const sentence of sentences) {
+          const chunk = appendTtsDelta(ttsBuffer, ttsCursor, text)
+          ttsBuffer = chunk.buffer
+          ttsCursor = chunk.cursor
+          for (const sentence of chunk.sentences) {
             ttsQueue.enqueue(sentence)
           }
         }
@@ -139,7 +139,7 @@ export async function runScoutResumeStream({
         if (finalContent !== '(No response)') {
           store.grantXp('chat')
           if (ttsQueue) {
-            const tail = extractTrailingSentence(ttsBuffer, ttsCursor)
+            const tail = flushTtsTail(ttsBuffer, ttsCursor)
             if (tail) {
               ttsQueue.flush(tail)
             }

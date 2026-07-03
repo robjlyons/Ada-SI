@@ -10,8 +10,14 @@ from secrets_config import get_effective_secret
 
 ELEVENLABS_API_BASE = "https://api.elevenlabs.io/v1"
 DEFAULT_VOICE_ID = "pFZP5JQG7iQjIQuC4Bku"
-DEFAULT_MODEL_ID = "eleven_flash_v2_5"
+DEFAULT_MODEL_ID = "eleven_turbo_v2_5"
 DEFAULT_OUTPUT_FORMAT = "mp3_44100_128"
+DEFAULT_VOICE_SETTINGS = {
+    "stability": 0.5,
+    "similarity_boost": 0.75,
+    "style": 0.0,
+    "use_speaker_boost": True,
+}
 
 
 def get_elevenlabs_api_key() -> str:
@@ -46,6 +52,7 @@ async def stream_speech(
     payload = {
         "text": trimmed,
         "model_id": DEFAULT_MODEL_ID,
+        "voice_settings": DEFAULT_VOICE_SETTINGS,
     }
     async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream("POST", url, headers=_auth_headers(), json=payload) as response:

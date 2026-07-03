@@ -107,6 +107,7 @@ class ElevenLabsTtsTests(unittest.TestCase):
             self.assertEqual(call_kwargs["json"]["text"], "Hello there")
 
             self.assertEqual(call_kwargs["json"]["model_id"], tts.DEFAULT_MODEL_ID)
+            self.assertEqual(call_kwargs["json"]["voice_settings"], tts.DEFAULT_VOICE_SETTINGS)
 
 
 

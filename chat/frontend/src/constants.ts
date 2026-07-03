@@ -8,7 +8,7 @@ export const GEMINI_GOOGLE_SEARCH_STORAGE_KEY = 'ada-si-gemini-google-search'
 export const TTS_ENABLED_STORAGE_KEY = 'ada-si-tts-enabled'
 export const TTS_VOICE_ID_STORAGE_KEY = 'ada-si-tts-voice-id'
 export const DEFAULT_TTS_VOICE_ID = 'pFZP5JQG7iQjIQuC4Bku'
-export const ELEVENLABS_TTS_MODEL_ID = 'eleven_flash_v2_5'
+export const ELEVENLABS_TTS_MODEL_ID = 'eleven_turbo_v2_5'
 
 export type SettingsSection = 'agents' | 'api-keys' | 'voice' | 'persona' | 'prompts' | 'progress'
 export const SCROLL_THRESHOLD = 80

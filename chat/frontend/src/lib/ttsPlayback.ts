@@ -1,4 +1,5 @@
 import { synthesizeSpeech, synthesizeSpeechStream } from '../api/client'
+import { sanitizeTextForTts } from '../utils/ttsText'
 
 let activeQueue: TtsSentenceQueue | null = null
 
@@ -18,14 +19,14 @@ export class TtsSentenceQueue {
   }
 
   enqueue(sentence: string): void {
-    const trimmed = sentence.trim()
+    const trimmed = sanitizeTextForTts(sentence)
     if (!trimmed || this.cancelled) return
     this.queue.push(trimmed)
     void this.runWorker()
   }
 
   flush(tail: string): void {
-    const trimmed = tail.trim()
+    const trimmed = sanitizeTextForTts(tail)
     if (trimmed) {
       this.enqueue(trimmed)
     }
@@ -124,7 +125,7 @@ export function stopTtsPlayback(): void {
 }
 
 export async function playTtsText(text: string, voiceId?: string): Promise<void> {
-  const trimmed = text.trim()
+  const trimmed = sanitizeTextForTts(text)
   if (!trimmed) return
 
   stopTtsPlayback()

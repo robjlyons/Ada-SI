@@ -9,7 +9,7 @@ import {
 import { syncScoutDisplayName } from '../lib/syncScoutDisplayName'
 import { buildMessages, useAppStore } from '../state/store'
 import { resolveTtsVoiceId } from '../utils/ttsVoice'
-import { extractCompletedSentences, extractTrailingSentence } from '../utils/sentenceSplit'
+import { appendTtsDelta, flushTtsTail } from '../utils/ttsText'
 import { useTtsPlayback } from './useTtsPlayback'
 import type { TtsSentenceQueue } from '../lib/ttsPlayback'
 
@@ -274,10 +274,10 @@ export function useChatStream() {
             })
 
             if (ttsQueue && text) {
-              ttsBuffer += text
-              const { sentences, cursor } = extractCompletedSentences(ttsBuffer, ttsCursor)
-              ttsCursor = cursor
-              for (const sentence of sentences) {
+              const chunk = appendTtsDelta(ttsBuffer, ttsCursor, text)
+              ttsBuffer = chunk.buffer
+              ttsCursor = chunk.cursor
+              for (const sentence of chunk.sentences) {
                 ttsQueue.enqueue(sentence)
               }
             }
@@ -310,7 +310,7 @@ export function useChatStream() {
               if (finalContent !== '(No response)' && !bootstrapOpening) {
                 store.grantXp('chat')
                 if (ttsQueue) {
-                  const tail = extractTrailingSentence(ttsBuffer, ttsCursor)
+                  const tail = flushTtsTail(ttsBuffer, ttsCursor)
                   if (tail) {
                     ttsQueue.flush(tail)
                   }

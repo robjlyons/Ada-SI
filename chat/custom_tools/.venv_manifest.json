@@ -1,7 +1,6 @@
 {
   "approved_packages": [
     "comtypes; sys_platform == 'win32'",
-    "pycaw; sys_platform == 'win32'",
-    "requests"
+    "pycaw; sys_platform == 'win32'"
   ]
 }

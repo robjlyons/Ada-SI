@@ -58,8 +58,9 @@ export function VoiceSettings() {
         <div>
           <h3>Voice output</h3>
           <p className="settings-section-desc">
-            When enabled, assistant replies are read aloud with ElevenLabs Flash v2.5 (
-            {ELEVENLABS_TTS_MODEL_ID}) and Scout is told to write in a speakable style.
+            When enabled, assistant replies are read aloud with ElevenLabs Turbo v2.5 (
+            {ELEVENLABS_TTS_MODEL_ID}). Markdown and code are stripped before synthesis, and
+            Scout is told to write in a speakable style.
           </p>
         </div>
       </div>
