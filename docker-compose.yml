@@ -45,7 +45,7 @@ services:
     build: ./chat
     container_name: ada-chat
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./chat/custom_tools:/app/custom_tools
       - ./chat/staging:/app/staging

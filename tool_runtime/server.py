@@ -41,6 +41,10 @@ class VerifyRequest(BaseModel):
     test_code: str
 
 
+def bad_request(message: str) -> HTTPException:
+    return HTTPException(status_code=400, detail=message)
+
+
 @app.get("/health")
 async def health() -> dict:
     manifest = load_manifest()
@@ -68,6 +72,8 @@ async def execute_tool(name: str, payload: RunRequest) -> dict:
         return {"status": "ok", "result": result}
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise bad_request(str(exc)) from exc
     except Exception as exc:
         logger.exception("Tool run failed: %s", name)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -75,13 +81,16 @@ async def execute_tool(name: str, payload: RunRequest) -> dict:
 
 @app.post("/tools/{name}/install")
 async def install(name: str, payload: InstallRequest) -> dict:
-    ok, logs = install_tool(
-        name,
-        payload.tool_code,
-        payload.test_code,
-        payload.requirements,
-        skip_pip=payload.skip_pip,
-    )
+    try:
+        ok, logs = install_tool(
+            name,
+            payload.tool_code,
+            payload.test_code,
+            payload.requirements,
+            skip_pip=payload.skip_pip,
+        )
+    except ValueError as exc:
+        raise bad_request(str(exc)) from exc
     if not ok:
         logger.error("Install failed for %s:\n%s", name, logs)
         raise HTTPException(status_code=502, detail=logs)
@@ -92,7 +101,10 @@ async def install(name: str, payload: InstallRequest) -> dict:
 async def verify(name: str, payload: VerifyRequest) -> dict:
     if not (payload.test_code or "").strip():
         raise HTTPException(status_code=400, detail="test_code is required.")
-    ok, logs = verify_tool_in_runtime(name, payload.test_code)
+    try:
+        ok, logs = verify_tool_in_runtime(name, payload.test_code)
+    except ValueError as exc:
+        raise bad_request(str(exc)) from exc
     if not ok:
         raise HTTPException(status_code=502, detail=logs)
     return {"status": "ok", "logs": logs}
@@ -103,7 +115,10 @@ async def pip_install_endpoint(payload: PipInstallRequest) -> dict:
     packages = [p.strip() for p in payload.packages if p.strip()]
     if not packages:
         raise HTTPException(status_code=400, detail="No packages specified.")
-    ok, logs = pip_install(packages)
+    try:
+        ok, logs = pip_install(packages)
+    except ValueError as exc:
+        raise bad_request(str(exc)) from exc
     if not ok:
         raise HTTPException(status_code=502, detail=logs)
     return {"status": "ok", "logs": logs}
@@ -116,7 +131,10 @@ async def list_pip_packages() -> dict:
 
 @app.delete("/pip/packages/{package_name}")
 async def uninstall_pip_package(package_name: str) -> dict:
-    ok, logs = pip_uninstall(package_name)
+    try:
+        ok, logs = pip_uninstall(package_name)
+    except ValueError as exc:
+        raise bad_request(str(exc)) from exc
     if not ok:
         if "not in the approved manifest" in logs:
             raise HTTPException(status_code=404, detail=logs)
@@ -131,5 +149,8 @@ async def manifest() -> dict:
 
 @app.delete("/tools/{name}")
 async def remove_tool(name: str) -> dict:
-    delete_tool(name)
+    try:
+        delete_tool(name)
+    except ValueError as exc:
+        raise bad_request(str(exc)) from exc
     return {"status": "deleted", "tool_name": name}
