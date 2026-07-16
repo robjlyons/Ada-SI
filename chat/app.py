@@ -186,6 +186,42 @@ PENDING_PLANS: dict[str, dict] = {}
 RUN_CANCEL_FLAGS: set[str] = set()
 
 app = FastAPI(title="Ada-SI Chat")
+
+SAFE_ORIGIN_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+DEFAULT_ALLOWED_ORIGINS = frozenset(
+    {
+        "http://127.0.0.1:8080",
+        "http://localhost:8080",
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    }
+)
+
+
+def allowed_browser_origins() -> set[str]:
+    configured = os.environ.get("ADA_ALLOWED_ORIGINS", "").strip()
+    if not configured:
+        return set(DEFAULT_ALLOWED_ORIGINS)
+    return {origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()}
+
+
+def _same_origin_from_referer(referer: str, allowed: set[str]) -> bool:
+    return any(referer == origin or referer.startswith(f"{origin}/") for origin in allowed)
+
+
+@app.middleware("http")
+async def reject_cross_origin_state_changes(request: Request, call_next):
+    if request.method.upper() not in SAFE_ORIGIN_METHODS:
+        allowed = allowed_browser_origins()
+        origin = (request.headers.get("origin") or "").rstrip("/")
+        referer = request.headers.get("referer") or ""
+        if origin and origin not in allowed:
+            return Response("Cross-origin requests are not allowed.", status_code=403)
+        if not origin and referer and not _same_origin_from_referer(referer, allowed):
+            return Response("Cross-origin requests are not allowed.", status_code=403)
+    return await call_next(request)
+
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

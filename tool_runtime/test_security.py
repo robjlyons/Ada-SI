@@ -34,3 +34,19 @@ def test_normalize_requirements_accepts_simple_pypi_specs():
 def test_normalize_requirements_rejects_url_paths_flags_and_markers(requirement):
     with pytest.raises(ValueError):
         normalize_requirements([requirement])
+
+
+def test_runtime_referer_origin_helper_accepts_allowed_origin():
+    from server import _same_origin_from_referer
+
+    assert _same_origin_from_referer(
+        "http://127.0.0.1:8080/settings", {"http://127.0.0.1:8080"}
+    )
+
+
+def test_runtime_referer_origin_helper_rejects_untrusted_origin_prefix():
+    from server import _same_origin_from_referer
+
+    assert not _same_origin_from_referer(
+        "http://127.0.0.1:8080.evil.example/settings", {"http://127.0.0.1:8080"}
+    )
