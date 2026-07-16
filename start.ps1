@@ -416,9 +416,12 @@ if (-not (Test-HttpReady 'http://127.0.0.1:4000/health/liveliness')) {
 }
 Write-Ok "LiteLLM is ready"
 
-$toolRuntimeEnv = $sharedEnv.Clone()
-$toolRuntimeEnv.TOOLS_DIR = $CustomToolsDir
-$toolRuntimeEnv.VENV_PATH = $ToolRuntimeVenv
+$toolRuntimeEnv = @{
+    PYTHONUTF8       = '1'
+    PYTHONIOENCODING = 'utf-8'
+    TOOLS_DIR        = $CustomToolsDir
+    VENV_PATH        = $ToolRuntimeVenv
+}
 
 Write-Step "Starting tool runtime on http://127.0.0.1:8090"
 Start-AdaProcess -Name 'tool-runtime' -ArgumentList @(

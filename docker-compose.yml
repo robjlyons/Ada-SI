@@ -30,7 +30,6 @@ services:
     environment:
       - TOOLS_DIR=/app/custom_tools
       - VENV_PATH=/app/venv
-      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
     healthcheck:
       test:
         - CMD-SHELL
