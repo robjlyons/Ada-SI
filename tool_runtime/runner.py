@@ -12,6 +12,11 @@ logger = logging.getLogger(__name__)
 TOOLS_DIR = Path(os.environ.get("TOOLS_DIR", "/app/custom_tools"))
 VENV_PATH = Path(os.environ.get("VENV_PATH", "/app/venv"))
 MANIFEST_PATH = TOOLS_DIR / ".venv_manifest.json"
+TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{1,64}$")
+PACKAGE_SPEC_PATTERN = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9_.-]*(?:\[[A-Za-z0-9_,.-]+\])?"
+    r"(?:\s*(?:==|!=|~=|>=|<=|>|<)\s*[A-Za-z0-9_.!*+!-]+)?$"
+)
 
 _JSON_LITERAL_PATTERNS = (
     (re.compile(r"(?<=[:\[,])\s*false\b(?=\s*[,}\]])"), "False"),
@@ -59,11 +64,38 @@ def save_manifest(manifest: dict) -> None:
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
+def validate_tool_name(tool_name: str) -> str:
+    name = str(tool_name or "").strip()
+    if not TOOL_NAME_PATTERN.fullmatch(name):
+        raise ValueError(
+            "Tool names may only contain letters, numbers, and underscores "
+            "(max 64 characters)."
+        )
+    return name
+
+
+def validate_requirement(requirement: str) -> str:
+    req = str(requirement or "").strip()
+    if not req:
+        return ""
+    if any(token in req for token in ("/", "\\", ";", "--")) or ":" in req:
+        raise ValueError(
+            f"Unsupported package requirement {req!r}. Use a simple PyPI package "
+            "name with an optional version specifier."
+        )
+    if not PACKAGE_SPEC_PATTERN.fullmatch(req):
+        raise ValueError(
+            f"Unsupported package requirement {req!r}. Use a simple PyPI package "
+            "name with an optional version specifier."
+        )
+    return req
+
+
 def normalize_requirements(requirements: list[str]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
     for req in requirements:
-        req = str(req).strip()
+        req = validate_requirement(str(req))
         if not req or req in seen:
             continue
         seen.add(req)
@@ -72,6 +104,7 @@ def normalize_requirements(requirements: list[str]) -> list[str]:
 
 
 def package_name(requirement: str) -> str:
+    requirement = validate_requirement(requirement)
     return re.split(r"[<>=!~\[]", requirement.strip())[0].strip().lower()
 
 
@@ -239,6 +272,7 @@ print(json.dumps(mod.get_tool_schema()))
 
 
 def run_tool(name: str, arguments: dict) -> str:
+    name = validate_tool_name(name)
     file = TOOLS_DIR / f"{name}.py"
     if not file.exists():
         raise FileNotFoundError(f"Tool '{name}' not found.")
@@ -298,6 +332,7 @@ def rewrite_workspace_paths(text: str, workspace_dir: Path) -> str:
 
 
 def verify_tool_in_runtime(tool_name: str, test_code: str) -> tuple[bool, str]:
+    tool_name = validate_tool_name(tool_name)
     ensure_venv()
     py = venv_python()
     test_path = TOOLS_DIR / f".verify_{tool_name}_test_run.py"
@@ -328,6 +363,7 @@ def install_tool(
     *,
     skip_pip: bool = False,
 ) -> tuple[bool, str]:
+    tool_name = validate_tool_name(tool_name)
     TOOLS_DIR.mkdir(parents=True, exist_ok=True)
     tool_code = sanitize_python_json_literals(tool_code)
     (TOOLS_DIR / f"{tool_name}.py").write_text(tool_code, encoding="utf-8")
@@ -351,6 +387,7 @@ def install_tool(
 
 
 def delete_tool(tool_name: str) -> None:
+    tool_name = validate_tool_name(tool_name)
     paths = [
         TOOLS_DIR / f"{tool_name}.py",
         TOOLS_DIR / f"{tool_name}.requirements.txt",

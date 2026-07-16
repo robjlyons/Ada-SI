@@ -50,19 +50,29 @@ See also [Security & Trust](#security--trust) for a fuller threat model.
 
 ## Security & Trust
 
-Ada-SI is designed for **one person on one trusted machine**. It is not multi-tenant software.
+Ada-SI is designed for **one person on one trusted machine**. It is not multi-tenant software, and it is still experimental. The default local launchers now favor localhost-only access and reduced secret exposure, but they do **not** make forged code safe. Treat every forged skill like an untrusted script that you chose to run.
 
-| Risk | Detail |
-|------|--------|
-| **No authentication** | Chat, forge, secrets, and persona APIs are open to anyone who can reach the service. Native installs also expose the tool runtime on `127.0.0.1:8090` with no auth — any local process can install packages or run tools. |
-| **AI computer control** | Scout and forged skills can execute Python, modify files under `chat/custom_tools/` and `chat/staging/`, install pip packages, and update persona/memory files. Background **heartbeat** can trigger LLM calls on a timer. |
-| **Weak isolation** | Tool execution uses a separate Python venv, not OS-level sandboxing. Do not treat forged skills as safe — treat them like running **untrusted scripts** you wrote yourself. |
-| **Supply chain** | Pip packages installed during forge (including pre-approval sandbox tests) can run install-time code on your host. Review package approvals in the Supplies tab. |
-| **Secrets exposure** | Provider API keys live in `.env`, `chat/staging/secrets.json`, and process environment. Forged tools may read `os.environ`. |
-| **Debug logging** | `ADA_LOG_LEVEL=DEBUG` may log chat content, tool arguments, and generated code to `logs/chat.log`. |
-| **VPS / remote use** | If you deploy with Docker, bind behind HTTPS, restrict network access, and assume port 8080 is fully privileged. Consider disabling forge on any internet-facing host. |
+### Current local safety defaults
 
-Human-in-the-loop gates (plan approval, pip approval, UI preview) help prevent mistakes. They do **not** prevent a determined or prompt-injected model from proposing harmful tools — you are the last line of defense.
+| Area | Default / mitigation | Remaining risk |
+|------|----------------------|----------------|
+| **Network exposure** | Native launch binds chat, LiteLLM, and tool runtime to `127.0.0.1`. Docker Compose publishes the chat UI as `127.0.0.1:8080:8080`; LiteLLM and tool runtime are not published to the host. | Any local process or browser profile on the machine can still reach the app. If you deliberately rebind to `0.0.0.0`, you are exposing a privileged unauthenticated app. |
+| **No authentication** | Localhost-only binding is the primary protection for local runs. | There is still **no login**. Anyone who can reach port `8080` can use chat, forge, secrets, and persona APIs. On native installs, local processes can also reach tool runtime on `127.0.0.1:8090`. |
+| **Browser cross-site requests** | Chat and tool-runtime APIs reject state-changing browser requests with untrusted `Origin` or `Referer` headers. This reduces drive-by CSRF from a malicious website while you are running Ada-SI locally. | Non-browser local processes can still call localhost directly, and allowed origins can still perform privileged actions. |
+| **Forged tool file access** | Tool runtime validates tool names before run, verify, install, and delete operations so requests cannot use path separators or dotted names to target files outside `chat/custom_tools/`. | Tool code itself is still arbitrary Python once you approve and install it. |
+| **Pip installs** | Tool runtime accepts only simple PyPI requirement strings with optional version specifiers; it rejects local paths, VCS/URL installs, pip flags, and environment markers before invoking `pip`. | Normal PyPI packages can still execute install-time code and may be malicious or compromised. Review package approvals carefully. |
+| **Secrets exposure** | Docker and native launchers do not pass provider API keys into the tool-runtime process by default; keys are intended for chat/LiteLLM. | The chat server still needs keys to call providers, keys may be stored in `.env` and `chat/staging/secrets.json`, and unsafe forged tools may try to read files or environment available to their process. |
+| **Debug logging** | Default log level is `INFO`; use `DEBUG` only when troubleshooting. | `ADA_LOG_LEVEL=DEBUG` may log chat content, tool arguments, and generated code to `logs/chat.log`. |
+| **VPS / remote use** | The checked-in Docker Compose file is local-only. If you need a different browser origin (for example a reverse proxy hostname), set `ADA_ALLOWED_ORIGINS` explicitly. | Remote use requires intentionally changing port binding or adding a reverse proxy/VPN/IP allowlist. Do **not** expose Ada-SI directly to the public internet. |
+
+### Risks that are not “fixed” by design
+
+- **AI computer control:** Scout can call installed skills and propose new ones that run arbitrary Python.
+- **Forge writes code:** the Forge pipeline can install packages and write executable files after approval gates. Those gates reduce accidents; they are not a security sandbox.
+- **Weak isolation:** forged skills run in a separate Python venv, not a hardened OS/container sandbox. They can still read/write files, spawn subprocesses, and make network requests with the permissions of the process running them.
+- **Local API trust:** because there is no built-in authentication, localhost access is treated as trusted. Do not run this on a shared, hostile, or kiosk machine.
+
+If you are unsure whether those risks are acceptable, **do not run this project**.
 
 ---
 
@@ -256,7 +266,7 @@ Use Docker when deploying to a VPS or when you do not want to install Python and
    ./start-docker.sh
    ```
 
-4. **Open the app** at `http://localhost:8080` (or `http://<your-server-ip>:8080` on a VPS).
+4. **Open the app** at `http://localhost:8080`. The default Docker Compose file binds to `127.0.0.1` only; remote/VPS access requires an explicit reverse proxy, VPN, SSH tunnel, or a deliberate port-binding change.
 
 **Windows (Docker Desktop)**
 
@@ -281,7 +291,7 @@ cd Ada-SI
 **What Docker runs**
 
 - Three containers: LiteLLM, tool runtime, and chat server
-- Only **port 8080** is exposed to the host; LiteLLM and tool runtime are internal
+- Only **port 8080** is exposed to the host, and it is bound to **127.0.0.1** by default; LiteLLM and tool runtime are internal
 - Data persists via volume mounts: `chat/staging/`, `chat/custom_tools/`
 - See [`docker-compose.yml`](docker-compose.yml) for service wiring
 
@@ -289,17 +299,23 @@ cd Ada-SI
 
 ### VPS deployment
 
-When running Ada-SI on a remote server, use the **Docker install** path above.
+Ada-SI is safest as a local-only app. The checked-in Docker Compose file binds the UI to `127.0.0.1`, so a browser on another machine cannot reach it directly. If you run Ada-SI on a VPS, prefer one of these access patterns instead of opening the app to the internet:
 
-1. **Firewall** — open port 8080, or place a reverse proxy (Caddy, nginx) in front for HTTPS on port 443.
+1. **SSH tunnel (recommended for personal use)** — keep Compose local-only and tunnel from your laptop:
 
    ```bash
-   sudo ufw allow 8080/tcp
+   ssh -L 8080:127.0.0.1:8080 user@your-server
    ```
 
-2. **Security** — Ada-SI has **no built-in authentication**. Do not expose port 8080 to the public internet without a reverse proxy, VPN, or IP allowlist.
+   Then open `http://127.0.0.1:8080` on your laptop.
 
-3. **Auto-start on reboot** (optional systemd unit):
+2. **VPN / private network** — expose access only over a private interface you control.
+
+3. **Reverse proxy with authentication and IP allowlisting** — if you must use HTTPS, put Caddy/nginx/Traefik in front and require authentication before traffic reaches Ada-SI.
+
+Do **not** run `sudo ufw allow 8080/tcp` for public access unless you have intentionally changed the deployment model and understand that Ada-SI has no built-in authentication.
+
+4. **Auto-start on reboot** (optional systemd unit):
 
    ```ini
    # /etc/systemd/system/ada-si.service
